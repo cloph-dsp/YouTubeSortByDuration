@@ -104,7 +104,7 @@ let isSorting = false;
 let scrollLoopTime = 600; // Base delay value
 let useAdaptiveDelay = true; 
 let baseDelayPerVideo = 5; // 5ms per video for delay calculation
-let minDelay = 5; // Minimum threshold
+let minDelay = 10; // Minimum threshold
 let maxDelay = 1500; // Maximum cap
 
 let sortMode = 'asc';
@@ -314,6 +314,8 @@ let waitForYoutubeProcessing = async () => {
         let updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
         if (updatedDragPoints.length > 0) {
             logActivity(`Recovered playlist view ✓`);
+            // Add additional waiting time after recovery to ensure YouTube has fully updated
+            await new Promise(r => setTimeout(r, 800));
             return true;
         }
         
@@ -345,6 +347,8 @@ let waitForYoutubeProcessing = async () => {
             updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
             if (updatedDragPoints.length > 0) {
                 logActivity(`Recovered after attempt ${i+1} ✓`);
+                // Add additional waiting time after recovery
+                await new Promise(r => setTimeout(r, 800 + i * 200));
                 return true;
             }
             
@@ -352,8 +356,33 @@ let waitForYoutubeProcessing = async () => {
             await new Promise(r => setTimeout(r, 500 + i * 300));
         }
         
-        // Final fallback - force continuation
-        logActivity(`Recovery attempts exhausted. Continuing...`);
+        // Final fallback - try one last approach
+        logActivity(`Attempting final recovery method...`);
+        
+        // Force a refresh of the playlist view by toggling focus on multiple elements
+        const playlistHeader = document.querySelector('ytd-playlist-header-renderer');
+        const sidebar = document.querySelector('ytd-guide-renderer');
+        
+        if (playlistHeader) playlistHeader.click();
+        await new Promise(r => setTimeout(r, 300));
+        if (sidebar) sidebar.click();
+        await new Promise(r => setTimeout(r, 300));
+        document.body.click();
+        
+        // Give YouTube more time to stabilize
+        await new Promise(r => setTimeout(r, 1200));
+        
+        // Check one last time
+        updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
+        if (updatedDragPoints.length > 0) {
+            logActivity(`Final recovery successful ✓`);
+            await new Promise(r => setTimeout(r, 1000));
+            return true;
+        }
+        
+        // If we get here, recovery failed but we'll continue anyway
+        logActivity(`Recovery attempts exhausted. Will retry sorting...`);
+        await new Promise(r => setTimeout(r, 1500));
     }
     
     return true;
