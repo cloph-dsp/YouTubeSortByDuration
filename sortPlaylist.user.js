@@ -103,8 +103,8 @@ const debug = false;
 let isSorting = false;
 let scrollLoopTime = 600; // Base delay value
 let useAdaptiveDelay = true; 
-let baseDelayPerVideo = 5; // 8ms per video for delay calculation
-let minDelay = 1; // Minimum threshold
+let baseDelayPerVideo = 5; // 5ms per video for delay calculation
+let minDelay = 5; // Minimum threshold
 let maxDelay = 1500; // Maximum cap
 
 let sortMode = 'asc';
