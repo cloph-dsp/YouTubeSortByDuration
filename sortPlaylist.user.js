@@ -316,11 +316,11 @@ let waitForYoutubeProcessing = async () => {
             logActivity(`Recovered playlist view ✓`);
             // Add additional waiting time after recovery to ensure YouTube has fully updated
             await new Promise(r => setTimeout(r, 800));
-            return true;
+            return true; // End recovery process when successful
         }
         
-        // If not, try more aggressive recovery
-        for (let i = 0; i < 3; i++) {
+        // Try more aggressive recovery - limited to 3 attempts
+        for (let i = 0; i < 3 && !stopSort; i++) {
             // Click in different areas of the page
             const areas = [
                 document.querySelector('.playlist-items'), // Playlist container
@@ -330,18 +330,20 @@ let waitForYoutubeProcessing = async () => {
             
             // Click on each available area
             for (const area of areas) {
-                if (area) {
+                if (area && !stopSort) {
                     area.click();
                     await new Promise(r => setTimeout(r, 300));
                 }
             }
             
             // Try scrolling slightly to trigger UI updates
-            const scrollElem = document.scrollingElement;
-            const currentPos = scrollElem.scrollTop;
-            scrollElem.scrollTop = currentPos + 10; 
-            await new Promise(r => setTimeout(r, 200));
-            scrollElem.scrollTop = currentPos;
+            if (!stopSort) {
+                const scrollElem = document.scrollingElement;
+                const currentPos = scrollElem.scrollTop;
+                scrollElem.scrollTop = currentPos + 10; 
+                await new Promise(r => setTimeout(r, 200));
+                scrollElem.scrollTop = currentPos;
+            }
             
             // Check if that worked
             updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
@@ -357,35 +359,37 @@ let waitForYoutubeProcessing = async () => {
         }
         
         // Final fallback - try one last approach
-        logActivity(`Attempting final recovery method...`);
-        
-        // Force a refresh of the playlist view by toggling focus on multiple elements
-        const playlistHeader = document.querySelector('ytd-playlist-header-renderer');
-        const sidebar = document.querySelector('ytd-guide-renderer');
-        
-        if (playlistHeader) playlistHeader.click();
-        await new Promise(r => setTimeout(r, 300));
-        if (sidebar) sidebar.click();
-        await new Promise(r => setTimeout(r, 300));
-        document.body.click();
-        
-        // Give YouTube more time to stabilize
-        await new Promise(r => setTimeout(r, 1200));
-        
-        // Check one last time
-        updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-        if (updatedDragPoints.length > 0) {
-            logActivity(`Final recovery successful ✓`);
-            await new Promise(r => setTimeout(r, 1000));
-            return true;
+        if (!stopSort) {
+            logActivity(`Attempting final recovery method...`);
+            
+            // Force a refresh of the playlist view by toggling focus on multiple elements
+            const playlistHeader = document.querySelector('ytd-playlist-header-renderer');
+            const sidebar = document.querySelector('ytd-guide-renderer');
+            
+            if (playlistHeader) playlistHeader.click();
+            await new Promise(r => setTimeout(r, 300));
+            if (sidebar) sidebar.click();
+            await new Promise(r => setTimeout(r, 300));
+            document.body.click();
+            
+            // Give YouTube more time to stabilize
+            await new Promise(r => setTimeout(r, 1200));
+            
+            // Check one last time
+            updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
+            if (updatedDragPoints.length > 0) {
+                logActivity(`Final recovery successful ✓`);
+                await new Promise(r => setTimeout(r, 1000));
+                return true;
+            }
+            
+            // If we get here, recovery failed
+            logActivity(`Recovery failed - skipping current operation`);
+            return false; // Important: Return false to indicate failure
         }
-        
-        // If we get here, recovery failed but we'll continue anyway
-        logActivity(`Recovery attempts exhausted. Will retry sorting...`);
-        await new Promise(r => setTimeout(r, 1500));
     }
     
-    return true;
+    return isProcessed; // Return actual processing status
 };
 
 // Check if playlist is fully loaded
@@ -409,7 +413,7 @@ let isYouTubePageReady = () => {
     if (isReady) {
         logActivity(`Ready to sort: ${loadedCount}/${reportedCount} videos loaded${hasSpinner ? ' (more loading)' : ''}`);
     } else {
-        logActivity(`Waiting for page to load: ${loadedCount}/${reportedCount || '?'} videos`);
+        logActivity(`Waiting for page to load: ${loadedCount}/${reportedCount || '?' } videos`);
     }
     
     return isReady;
@@ -588,7 +592,14 @@ let activateSort = async () => {
         }
 
         sortedCount = Number(sortVideos(allAnchors, allDragPoints, initialVideoCount) + 1);
-        await waitForYoutubeProcessing();
+        const processingSuccessful = await waitForYoutubeProcessing();
+    
+        // Skip to next iteration if processing failed
+        if (!processingSuccessful) {
+            logActivity("Skipping problematic iteration and continuing...");
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+        }
     }
     
     // Show final status
