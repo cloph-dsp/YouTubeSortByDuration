@@ -18,8 +18,7 @@
 // ==/UserScript==
 
 // CSS styles
-const css =
-    `
+const css = `
         .sort-playlist-div {
             font-size: 12px;
             padding: 3px 1px;
@@ -99,20 +98,21 @@ const modeAvailable = [
 
 const debug = false;
 
-// Sort configuration
+// Config
 let isSorting = false;
-let scrollLoopTime = 600; // Base delay value
-let useAdaptiveDelay = true; 
-let baseDelayPerVideo = 5; // 5ms per video for delay calculation
-let minDelay = 10; // Minimum threshold
-let maxDelay = 1500; // Maximum cap
+let scrollLoopTime = 500;
+let useAdaptiveDelay = true;
+let baseDelayPerVideo = 5;
+let minDelay = 10;
+let maxDelay = 1000;
+let fastModeThreshold = 200;
 
 let sortMode = 'asc';
 let autoScrollInitialVideoList = true;
 let log = document.createElement('div');
 let stopSort = false;
 
-// Fire a mouse event at specific coordinates
+// Fire mouse event at coordinates
 let fireMouseEvent = (type, elem, centerX, centerY) => {
     const event = new MouseEvent(type, {
         view: window,
@@ -125,9 +125,9 @@ let fireMouseEvent = (type, elem, centerX, centerY) => {
     elem.dispatchEvent(event);
 };
 
-// Simulate drag and drop between elements
+// Simulate drag between elements
 let simulateDrag = (elemDrag, elemDrop) => {
-    // Calculate positions
+    // Get positions
     let pos = elemDrag.getBoundingClientRect();
     let center1X = Math.floor((pos.left + pos.right) / 2);
     let center1Y = Math.floor((pos.top + pos.bottom) / 2);
@@ -141,7 +141,7 @@ let simulateDrag = (elemDrag, elemDrop) => {
     fireMouseEvent("mouseover", elemDrag, center1X, center1Y);
     fireMouseEvent("mousedown", elemDrag, center1X, center1Y);
 
-    // Start dragging process
+    // Start drag
     fireMouseEvent("dragstart", elemDrag, center1X, center1Y);
     fireMouseEvent("drag", elemDrag, center1X, center1Y);
     fireMouseEvent("mousemove", elemDrag, center1X, center1Y);
@@ -154,27 +154,63 @@ let simulateDrag = (elemDrag, elemDrop) => {
     fireMouseEvent("mouseover", elemDrop, center2X, center2Y);
     fireMouseEvent("dragover", elemDrop, center2X, center2Y);
 
-    // Complete the drop
+    // Complete drop
     fireMouseEvent("drop", elemDrop, center2X, center2Y);
     fireMouseEvent("dragend", elemDrag, center2X, center2Y);
     fireMouseEvent("mouseup", elemDrag, center2X, center2Y);
 };
 
-// Scroll to a specific position or bottom of page
+// Scroll to position or page bottom
 let autoScroll = async (scrollTop = null) => {
     let element = document.scrollingElement;
-    let currentScroll = element.scrollTop;
     let scrollDestination = scrollTop !== null ? scrollTop : element.scrollHeight;
-    let scrollCount = 0;
-    do {
-        currentScroll = element.scrollTop;
-        element.scrollTop = scrollDestination;
-        await new Promise(r => setTimeout(r, scrollLoopTime));
-        scrollCount++;
-    } while (currentScroll != scrollDestination && scrollCount < 2 && stopSort === false);
+    let startPosition = element.scrollTop;
+
+    logActivity(`Scrolling page... 📜`);
+    
+    // Use stepped approach for longer scrolls
+    if (Math.abs(startPosition - scrollDestination) > 3000) {
+        const totalSteps = 4;
+        const stepSize = (scrollDestination - startPosition) / totalSteps;
+        
+        for (let i = 1; i <= totalSteps && !stopSort; i++) {
+            const intermediatePosition = startPosition + (stepSize * i);
+            
+            element.scrollTo({
+                top: intermediatePosition,
+                behavior: 'smooth'
+            });
+            
+            await new Promise(r => setTimeout(r, Math.max(350, scrollLoopTime * 0.5)));
+        }
+        
+        // Final adjustment
+        if (Math.abs(element.scrollTop - scrollDestination) > 50 && !stopSort) {
+            element.scrollTop = scrollDestination;
+            await new Promise(r => setTimeout(r, Math.max(500, scrollLoopTime * 0.6)));
+        }
+    } else {
+        // For shorter distances
+        try {
+            element.scrollTo({
+                top: scrollDestination,
+                behavior: 'smooth'
+            });
+            
+            await new Promise(r => setTimeout(r, Math.max(350, scrollLoopTime * 0.6)));
+            
+            if (Math.abs(element.scrollTop - scrollDestination) > 50 && !stopSort) {
+                element.scrollTop = scrollDestination;
+                await new Promise(r => setTimeout(r, Math.max(450, scrollLoopTime * 0.7)));
+            }
+        } catch (e) {
+            element.scrollTop = scrollDestination;
+            await new Promise(r => setTimeout(r, Math.max(550, scrollLoopTime * 0.8)));
+        }
+    }
 };
 
-// Display log message
+// Log message to UI
 let logActivity = (message) => {
     log.innerText = message;
     if (debug) {
@@ -182,7 +218,7 @@ let logActivity = (message) => {
     }
 };
 
-// Create the main container for UI elements
+// Create UI container
 let renderContainerElement = () => {
     const element = document.createElement('div')
     element.className = 'sort-playlist sort-playlist-div'
@@ -195,7 +231,7 @@ let renderContainerElement = () => {
     document.querySelector('div.thumbnail-and-metadata-wrapper').append(element)
 }
 
-// Create toggle button for sorting
+// Create sort toggle button
 let renderToggleButton = () => {
     const element = document.createElement('button');
     element.id = 'sort-toggle-button';
@@ -204,17 +240,17 @@ let renderToggleButton = () => {
     
     element.onclick = async () => {
         if (!isSorting) {
-            // Start sorting
+            // Start
             isSorting = true;
             element.className = 'style-scope sort-button-toggle sort-button-stop';
             element.innerText = 'Stop Sorting';
             await activateSort();
-            // Reset button
+            // Reset
             isSorting = false;
             element.className = 'style-scope sort-button-toggle sort-button-start';
             element.innerText = 'Sort Videos';
         } else {
-            // Stop sorting
+            // Stop
             stopSort = true;
             isSorting = false;
             element.className = 'style-scope sort-button-toggle sort-button-start';
@@ -247,7 +283,7 @@ let renderSelectElement = (variable = 0, options = [], label = '') => {
     document.querySelector('.sort-playlist-controls').appendChild(element);
 };
 
-// Create number input element
+// Create number input
 let renderNumberElement = (defaultValue = 0, label = '') => {
     const elementDiv = document.createElement('div');
     elementDiv.className = 'sort-playlist-div sort-margin-right-3px';
@@ -270,24 +306,26 @@ let renderLogElement = () => {
     document.querySelector('div.sort-playlist').appendChild(log);
 };
 
-// Add CSS to the page
+// Add CSS to page
 let addCssStyle = () => {
     const element = document.createElement('style');
     element.textContent = css;
     document.head.appendChild(element);
 };
 
-// Wait for YouTube to process drag operation using polling
+// Wait for YouTube to process drag
 let waitForYoutubeProcessing = async () => {
-    const maxWaitTime = scrollLoopTime * 8;
+    const maxWaitTime = Math.max(scrollLoopTime * 3, 1000);
     const startTime = Date.now();
     let isProcessed = false;
     
     logActivity(`Rearranging playlist... ⏳`);
     
-    // First attempt - normal polling
+    // Fast polling
+    const pollInterval = Math.min(50, Math.max(25, scrollLoopTime * 0.1));
+    
     while (!isProcessed && Date.now() - startTime < maxWaitTime && !stopSort) {
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, pollInterval));
         
         const allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
         const currentItems = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
@@ -299,97 +337,107 @@ let waitForYoutubeProcessing = async () => {
             if (timeTaken > 1000) {
                 logActivity(`Video moved successfully ✓`);
             }
+            
+            // Stabilization wait
+            await new Promise(r => setTimeout(r, Math.min(180, scrollLoopTime * 0.25)));
+            return true;
         }
     }
     
-    // Enhanced recovery if timeout occurs
+    // Recovery methods
+
+    // Fast recovery approach
     if (!isProcessed) {
         logActivity(`Ensuring YouTube updates... ⏱️`);
         
-        // First try clicking body to refocus
+        // Click body to refocus
         document.body.click();
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 275));
         
-        // Check if that fixed it
+        // Check results
         let updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-        if (updatedDragPoints.length > 0) {
+        let allThumbnails = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
+        
+        if (updatedDragPoints.length > 0 && allThumbnails.length > 0) {
             logActivity(`Recovered playlist view ✓`);
-            // Add additional waiting time after recovery to ensure YouTube has fully updated
-            await new Promise(r => setTimeout(r, 800));
-            return true; // End recovery process when successful
+            await new Promise(r => setTimeout(r, 540));
+            
+            // Force refresh
+            window.dispatchEvent(new Event('resize'));
+            await new Promise(r => setTimeout(r, 180));
+            
+            return true;
         }
         
-        // Try more aggressive recovery - limited to 3 attempts
-        for (let i = 0; i < 3 && !stopSort; i++) {
-            // Click in different areas of the page
+        // Try faster recovery (2 attempts)
+        for (let i = 0; i < 2 && !stopSort; i++) {
             const areas = [
-                document.querySelector('.playlist-items'), // Playlist container
-                document.querySelector('ytd-playlist-header-renderer'), // Header
-                document.body // Body as fallback
+                document.querySelector('.playlist-items'), 
+                document.body
             ];
             
-            // Click on each available area
+            // Click areas
             for (const area of areas) {
                 if (area && !stopSort) {
                     area.click();
-                    await new Promise(r => setTimeout(r, 300));
+                    await new Promise(r => setTimeout(r, 125));
                 }
             }
             
-            // Try scrolling slightly to trigger UI updates
+            // Slight scroll
             if (!stopSort) {
                 const scrollElem = document.scrollingElement;
                 const currentPos = scrollElem.scrollTop;
                 scrollElem.scrollTop = currentPos + 10; 
-                await new Promise(r => setTimeout(r, 200));
+                await new Promise(r => setTimeout(r, 125));
                 scrollElem.scrollTop = currentPos;
             }
             
-            // Check if that worked
+            // Check if successful
             updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-            if (updatedDragPoints.length > 0) {
+            allThumbnails = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
+            
+            if (updatedDragPoints.length > 0 && allThumbnails.length > 0) {
                 logActivity(`Recovered after attempt ${i+1} ✓`);
-                // Add additional waiting time after recovery
-                await new Promise(r => setTimeout(r, 800 + i * 200));
+                await new Promise(r => setTimeout(r, (540 + i * 125)));
+                
+                // Force refresh
+                window.dispatchEvent(new Event('resize'));
+                await new Promise(r => setTimeout(r, 175));
+                
                 return true;
             }
             
-            // Wait a bit longer on each retry
-            await new Promise(r => setTimeout(r, 500 + i * 300));
+            await new Promise(r => setTimeout(r, 315 + i * 175));
         }
         
-        // Final fallback - try one last approach
+        // Final fallback
         if (!stopSort) {
             logActivity(`Attempting final recovery method...`);
             
-            // Force a refresh of the playlist view by toggling focus on multiple elements
-            const playlistHeader = document.querySelector('ytd-playlist-header-renderer');
-            const sidebar = document.querySelector('ytd-guide-renderer');
-            
-            if (playlistHeader) playlistHeader.click();
-            await new Promise(r => setTimeout(r, 300));
-            if (sidebar) sidebar.click();
-            await new Promise(r => setTimeout(r, 300));
             document.body.click();
+            await new Promise(r => setTimeout(r, 225));
             
-            // Give YouTube more time to stabilize
-            await new Promise(r => setTimeout(r, 1200));
+            const playlistHeader = document.querySelector('ytd-playlist-header-renderer');
+            if (playlistHeader) playlistHeader.click();
             
-            // Check one last time
+            await new Promise(r => setTimeout(r, 725));
+            // Final check
             updatedDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-            if (updatedDragPoints.length > 0) {
+            allThumbnails = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
+            if (updatedDragPoints.length > 0 && allThumbnails.length > 0) {
                 logActivity(`Final recovery successful ✓`);
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, 700)); 
+                // Force refresh
+                window.dispatchEvent(new Event('resize'));
+                await new Promise(r => setTimeout(r, 175));
                 return true;
             }
-            
-            // If we get here, recovery failed
-            logActivity(`Recovery failed - skipping current operation`);
-            return false; // Important: Return false to indicate failure
+            logActivity(`Recovery failed - skipping operation`);
+            return false;
         }
     }
-    
-    return isProcessed; // Return actual processing status
+    return isProcessed;
 };
 
 // Check if playlist is fully loaded
@@ -398,24 +446,50 @@ let isPlaylistFullyLoaded = (reportedCount, loadedCount) => {
     return reportedCount === loadedCount && !hasSpinner;
 };
 
-// Check if YouTube page is ready for sorting
+// Check if YouTube page is ready
 let isYouTubePageReady = () => {
     const playlistContainer = document.querySelector("ytd-item-section-renderer:first-of-type");
     const videoCount = document.querySelector(".metadata-stats span.yt-formatted-string:first-of-type");
     const dragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-    const hasSpinner = document.querySelector('.ytd-continuation-item-renderer') !== null;
+    
+    // Spinner detection
+    const spinnerElements = document.querySelectorAll('.ytd-continuation-item-renderer, yt-icon-button.ytd-continuation-item-renderer, .circle.ytd-spinner');
+    const hasVisibleSpinner = Array.from(spinnerElements).some(el => {
+        const rect = el.getBoundingClientRect();
+        return (rect.width > 0 && rect.height > 0 && 
+                rect.top >= 0 && rect.top <= window.innerHeight);
+    });
     
     const reportedCount = videoCount ? Number(videoCount.innerText) : 0;
     const loadedCount = dragPoints.length;
+    const youtubeLoadLimit = 100;
     
-    const isReady = playlistContainer && videoCount && loadedCount > 0;
+    // Check readiness
+    const basicElementsReady = playlistContainer && videoCount && loadedCount > 0;
+    const hasEnoughVideos = loadedCount >= 95 || loadedCount === reportedCount;
+    const fullyLoaded = (!hasVisibleSpinner && hasEnoughVideos) || 
+                         (loadedCount >= 0.97 * Math.min(reportedCount, youtubeLoadLimit));
     
+    const isReady = basicElementsReady && fullyLoaded;
+    
+    // Show status
     if (isReady) {
-        logActivity(`Ready to sort: ${loadedCount}/${reportedCount} videos loaded${hasSpinner ? ' (more loading)' : ''}`);
+        if (loadedCount < reportedCount) {
+            logActivity(`✅ Ready: ${loadedCount}/${reportedCount} videos (YouTube limit reached)`);
+        } else {
+            logActivity(`✅ Ready: ${loadedCount}/${reportedCount} videos`);
+        }
+    } else if (basicElementsReady) {
+        if (hasVisibleSpinner) {
+            logActivity(`⏳ Loading: ${loadedCount}/${reportedCount} videos`);
+        } else if (loadedCount < reportedCount) {
+            logActivity(`⚠️ Some videos unavailable: ${loadedCount}/${reportedCount}`);
+        } else {
+            logActivity(`⌛ Waiting: ${loadedCount} videos`);
+        }
     } else {
-        logActivity(`Waiting for page to load: ${loadedCount}/${reportedCount || '?' } videos`);
+        logActivity(`🔄 Waiting: ${loadedCount}/${reportedCount || '?'} videos`);
     }
-    
     return isReady;
 };
 
@@ -424,17 +498,16 @@ let sortVideos = (allAnchors, allDragPoints, expectedCount) => {
     let videos = [];
     let sorted = 0;
     let dragged = false;
-
+    
     if (allDragPoints.length !== expectedCount || allAnchors.length !== expectedCount) {
-        logActivity("Playlist is not fully loaded, waiting...");
+        logActivity("Playlist not fully loaded, waiting...");
         return 0;
     }
-
-    // Collect video durations
+    
+    // Get duration for each video
     for (let j = 0; j < allDragPoints.length; j++) {
         let thumb = allAnchors[j];
         let drag = allDragPoints[j];
-
         let timeSpan = thumb.querySelector("#text");
         let timeDigits = timeSpan.innerText.trim().split(":").reverse();
         let time;
@@ -447,15 +520,15 @@ let sortVideos = (allAnchors, allDragPoints, expectedCount) => {
         }
         videos.push({ anchor: drag, time: time, originalIndex: j });
     }
-
+    
     // Sort by duration
     if (sortMode == "asc") {
         videos.sort((a, b) => a.time - b.time);
     } else {
         videos.sort((a, b) => b.time - a.time);
     }
-
-    // Perform the drag operations
+    
+    // Drag operations
     for (let j = 0; j < videos.length; j++) {
         let originalIndex = videos[j].originalIndex;
 
@@ -484,11 +557,11 @@ let sortVideos = (allAnchors, allDragPoints, expectedCount) => {
 
 // Main sorting function
 let activateSort = async () => {
-    // Ensure manual sorting mode
+    // Set manual sorting mode
     const ensureManualSort = async () => {
         const sortButton = document.querySelector('yt-dropdown-menu[icon-label="Ordenar"] tp-yt-paper-button, yt-dropdown-menu[icon-label="Sort"] tp-yt-paper-button');
         if (!sortButton) {
-            logActivity("Sort dropdown not found. Using current sort mode.");
+            logActivity("Sort dropdown not found. Using current mode.");
             return;
         }
         
@@ -501,28 +574,34 @@ let activateSort = async () => {
             logActivity("Switched to Manual sort mode");
             await new Promise(r => setTimeout(r, 500));
         } else {
-            logActivity("Manual sort option not found. Using current sort mode.");
+            logActivity("Manual sort option not found. Using current mode.");
         }
     };
-    
+
     await ensureManualSort();
-    
     let reportedVideoCount = Number(document.querySelector(".metadata-stats span.yt-formatted-string:first-of-type").innerText);
     let allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
     let allAnchors;
-
-    // Calculate adaptive delay
+    
+    // Set optimal delay based on playlist size
     if (useAdaptiveDelay) {
-        if (autoScrollInitialVideoList) {
-            // When loading all videos, use fastest possible speed with minimal delay
-            scrollLoopTime = minDelay;
-            logActivity(`Using fastest processing speed (${scrollLoopTime}ms)`);
+        const needsScrolling = reportedVideoCount > 95 && allDragPoints.length < reportedVideoCount && autoScrollInitialVideoList;
+        
+        if (needsScrolling) {
+            scrollLoopTime = Math.max(500, minDelay * 8);
+            logActivity(`Using scroll-safe speed (${scrollLoopTime}ms)`);
         } else {
-            // When not loading all videos, use calculated delay based on visible count
             let videoCount = reportedVideoCount || allDragPoints.length;
-            let calculatedDelay = Math.max(minDelay, baseDelayPerVideo * videoCount);
-            scrollLoopTime = Math.min(calculatedDelay, maxDelay);
-            logActivity(`Using adaptive delay: ${scrollLoopTime}ms based on visible videos`);
+            
+            if (videoCount <= fastModeThreshold) {
+                let fastDelay = Math.max(75, baseDelayPerVideo * Math.sqrt(videoCount * 0.75));
+                scrollLoopTime = Math.min(fastDelay, 350);
+                logActivity(`Using fast mode: ${scrollLoopTime}ms}`);
+            } else {
+                let calculatedDelay = Math.max(100, baseDelayPerVideo * Math.log(videoCount) * 2.5);
+                scrollLoopTime = Math.min(calculatedDelay, 800);
+                logActivity(`Using adaptive delay: ${scrollLoopTime}ms}`);
+            }
         }
     }
     
@@ -530,8 +609,9 @@ let activateSort = async () => {
     let initialVideoCount = allDragPoints.length;
     let scrollRetryCount = 0;
     stopSort = false;
+    let consecutiveRecoveryFailures = 0;
 
-    // Load all videos in playlist
+    // Load all videos
     while (reportedVideoCount !== initialVideoCount
         && document.URL.includes("playlist?list=")
         && stopSort === false
@@ -543,14 +623,14 @@ let activateSort = async () => {
             logActivity(`Some videos may be unavailable. Attempt: ${scrollRetryCount}/5`);
         }
         
-        if (allDragPoints.length > 300) {
-            logActivity(`${allDragPoints.length} videos loaded - this may take a while`);
-        } else if (allDragPoints.length > 600) {
-            logActivity(`${allDragPoints.length} videos - sorting large playlists may be slow`);
+        // Show appropriate warning based on playlist size
+        if (allDragPoints.length > 600) {
+            logActivity(`${allDragPoints.length} videos - large playlist warning (may take several minutes)`);
+        } else if (allDragPoints.length > 300) {
+            logActivity(`${allDragPoints.length} videos - this may take a while`);
         }
         
         await autoScroll();
-
         allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
         initialVideoCount = allDragPoints.length;
 
@@ -558,60 +638,86 @@ let activateSort = async () => {
             scrollRetryCount++;
         }
     }
-
     logActivity(initialVideoCount + " videos loaded.");
-    if (scrollRetryCount > 5) logActivity(log.innerText + "\nScroll attempt exhausted. Proceeding with sort despite video count mismatch.");
+    if (scrollRetryCount > 5) logActivity(log.innerText + "\nMax scroll attempts reached. Proceeding with available videos.");
     let loadedLocation = document.scrollingElement.scrollTop;
     scrollRetryCount = 0;
 
-    // Sort and reorder videos
+    // Sort videos
     const sortStartTime = Date.now();
-    const maxSortTime = 300000; // 5 minutes maximum sort time
+    const maxSortTime = 900000; // 15 minutes max
+
+    // Check timeout
+    if (Date.now() - sortStartTime > maxSortTime) {
+        logActivity("Sorting timed out after 15 minutes.");
+        return;
+    }
     
     while (sortedCount < initialVideoCount && stopSort === false) {
-        // Check for timeout
+        // Check timeout
         if (Date.now() - sortStartTime > maxSortTime) {
-            logActivity("Sorting timed out after 5 minutes. Please try again with fewer videos.");
+            logActivity("Sorting timed out after 15 minutes.");
             return;
         }
         
+        // Reset after recovery failures
+        if (consecutiveRecoveryFailures >= 3) {
+            logActivity("Too many failures. Reattempting...");
+            await new Promise(r => setTimeout(r, 1500));
+            consecutiveRecoveryFailures = 0;
+        }
         allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
         allAnchors = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
         scrollRetryCount = 0;
 
-        // Ensure video durations are loaded
-        while (!allAnchors[initialVideoCount - 1].querySelector("#text") && stopSort === false) {
+        // Ensure durations loaded
+        while (!allAnchors[initialVideoCount - 1]?.querySelector("#text") && stopSort === false) {
             if (document.scrollingElement.scrollTop < loadedLocation && scrollRetryCount < 3) {
-                logActivity(`Loading video details... (${sortedCount + 1}/${initialVideoCount})`);
-                await autoScroll(loadedLocation); // Fixed: use loadedLocation instead of currentLocation
+                logActivity(`Loading details... (${sortedCount + 1}/${initialVideoCount})`);
+                await autoScroll(loadedLocation);
                 scrollRetryCount++;
             } else {
-                logActivity(`Scrolling to load remaining content...`);
+                logActivity(`Scrolling for content...`);
                 await autoScroll();
+            }
+            // Refresh references
+            allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
+            allAnchors = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
+            if (allAnchors.length === 0 || allDragPoints.length === 0) {
+                logActivity("Lost video references. Waiting...");
+                await new Promise(r => setTimeout(r, 1000));
             }
         }
 
-        sortedCount = Number(sortVideos(allAnchors, allDragPoints, initialVideoCount) + 1);
-        const processingSuccessful = await waitForYoutubeProcessing();
-    
-        // Skip to next iteration if processing failed
-        if (!processingSuccessful) {
-            logActivity("Skipping problematic iteration and continuing...");
-            await new Promise(r => setTimeout(r, 1000));
-            continue;
+        // Sort if elements available
+        if (allAnchors.length > 0 && allDragPoints.length > 0) {
+            sortedCount = Number(sortVideos(allAnchors, allDragPoints, initialVideoCount) + 1);
+            const processingSuccessful = await waitForYoutubeProcessing();
+            if (!processingSuccessful) {
+                logActivity("Recovery failed - waiting...");
+                consecutiveRecoveryFailures++;
+                await new Promise(r => setTimeout(r, 1000 + (consecutiveRecoveryFailures * 300)));
+                continue;
+            } else {
+                consecutiveRecoveryFailures = 0;
+            }
+        } else {
+            logActivity("No video elements. Waiting...");
+            await new Promise(r => setTimeout(r, 1500));
+            consecutiveRecoveryFailures++;
         }
     }
     
-    // Show final status
+    // Final status
     if (stopSort === true) {
         logActivity("Sorting canceled ⛔");
         stopSort = false;
     } else {
-        logActivity(`Sorting complete ✓ (${sortedCount} videos organized)`);
+        logActivity(`Sorting complete ✓ (${sortedCount} videos)`);
     }
 };
 
-// Initialize UI components
+// Initialize UI
 let init = () => {
     onElementReady('div.thumbnail-and-metadata-wrapper', false, () => {
         autoScrollInitialVideoList = true;
@@ -623,7 +729,7 @@ let init = () => {
         renderSelectElement(0, modeAvailable, 'Sort Order');
         renderLogElement();
         
-        // Check page loading status
+        // Check page loading
         const checkPageInterval = setInterval(() => {
             if (isYouTubePageReady()) {
                 logActivity("✓ Ready to sort");
