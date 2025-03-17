@@ -4,7 +4,7 @@
 // ==UserScript==
 // @name              YT Playlist Sorter
 // @namespace         https://github.com/KohGeek/SortYoutubePlaylistByDuration
-// @version           3.5
+// @version           4.0
 // @description       Sorts youtube playlist by duration
 // @author            cloph-dsp
 // @originalAuthor    KohGeek
