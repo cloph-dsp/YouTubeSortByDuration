@@ -3,16 +3,15 @@
 /* jshint esversion: 8 */
 // ==UserScript==
 // @name              YT Playlist Sorter
-// @namespace         https://github.com/KohGeek/SortYoutubePlaylistByDuration
+// @namespace         https://github.com/cloph-dsp/SortYoutubePlaylistByDuration
 // @version           4.0
-// @description       Sorts youtube playlist by duration
+// @description       Sorts YouTube WL playlists by video duration
 // @author            cloph-dsp
 // @originalAuthor    KohGeek
 // @license           GPL-2.0-only
 // @match             http://*.youtube.com/*
 // @match             https://*.youtube.com/*
 // @require           https://greasyfork.org/scripts/374849-library-onelementready-es7/code/Library%20%7C%20onElementReady%20ES7.js
-// @supportURL        https://github.com/KohGeek/SortYoutubePlaylistByDuration/
 // @grant             none
 // @run-at            document-start
 // ==/UserScript==
@@ -565,20 +564,80 @@ let activateSort = async () => {
             return;
         }
         
-        sortButton.click();
-        await new Promise(r => setTimeout(r, 300));
+        // Check if dropdown is already open and close it first (clean state)
+        const isDropdownOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
+        if (isDropdownOpen) {
+            // Click away to close the dropdown
+            document.body.click();
+            await new Promise(r => setTimeout(r, 100));
+        }
         
+        // Open the dropdown menu
+        logActivity("Opening sort dropdown...");
+        sortButton.click();
+        await new Promise(r => setTimeout(r, 200));
+        
+        // Verify dropdown is visible
+        const dropdownMenu = document.querySelector('tp-yt-paper-listbox:not([hidden])');
+        if (!dropdownMenu) {
+            // Try once more if the dropdown didn't appear
+            sortButton.click();
+            await new Promise(r => setTimeout(r, 250));
+        }
+        
+        // Ensure the dropdown is visible and select the manual option
         const manualOption = document.querySelector('tp-yt-paper-listbox a:first-child tp-yt-paper-item');
         if (manualOption) {
-            manualOption.click();
-            logActivity("Switched to Manual sort mode");
-            await new Promise(r => setTimeout(r, 500));
+            // Check if already selected to avoid unnecessary clicks
+            const isSelected = manualOption.hasAttribute('selected') || 
+                              manualOption.classList.contains('iron-selected') ||
+                              manualOption.getAttribute('aria-selected') === 'true';
+            
+            if (!isSelected) {
+                manualOption.click();
+                logActivity("Switched to Manual sort mode");
+                await new Promise(r => setTimeout(r, 250));
+            } else {
+                logActivity("Manual sort mode already active");
+            }
+            
+            // Ensure dropdown is closed by clicking away if still open
+            const stillOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
+            if (stillOpen) {
+                document.body.click();
+                await new Promise(r => setTimeout(r, 100));
+            }
+            
+            // Quick verification
+            const verifySort = document.querySelector('.dropdown-trigger-text');
+            if (verifySort && verifySort.textContent.toLowerCase().includes('manual')) {
+                logActivity("Manual sort mode confirmed ✓");
+            }
+            
+            return true;
         } else {
+            // Fallback method if first item not found
+            const allOptions = document.querySelectorAll('tp-yt-paper-listbox a tp-yt-paper-item');
+            for (const option of allOptions) {
+                if (option.textContent.toLowerCase().includes('manual')) {
+                    option.click();
+                    logActivity("Found and selected Manual sort mode");
+                    await new Promise(r => setTimeout(r, 250));
+                    
+                    // Close dropdown
+                    document.body.click();
+                    return true;
+                }
+            }
+            
+            // Close dropdown if option not found
+            document.body.click();
             logActivity("Manual sort option not found. Using current mode.");
+            return false;
         }
     };
 
-    await ensureManualSort();
+    const manualSortSet = await ensureManualSort();
     let reportedVideoCount = Number(document.querySelector(".metadata-stats span.yt-formatted-string:first-of-type").innerText);
     let allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
     let allAnchors;
