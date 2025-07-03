@@ -1,55 +1,57 @@
-# Sort Youtube Playlist By Duration
+# Sort YouTube Playlist By Duration
 
-A userscript that lets you sort any YouTube playlist by video duration (shortest to longest or longest to shortest).
+This is a userscript for sorting any YouTube playlist by video duration (either shortest-to-longest or longest-to-shortest).  
+**This project is a fork of [KohGeek/SortYoutubePlaylistByDuration](https://github.com/KohGeek/SortYoutubePlaylistByDuration),** with various improvements in UI, reordering speed, and broader compatibility to ensure it works on all playlists.
 
 ## Features
 
-- Automatically sorts YouTube playlists by video duration
-- Toggle between sorting by shortest or longest videos
-- Adaptive performance based on playlist size
-- Modern UI with status indicators and controls
+- Sorts YouTube playlists by video length
+- Switch between ascending or descending order
+- Enhanced UI with clear controls and status feedback
+- Optimized for faster sorting, even on large playlists
+- Designed to work reliably across all types of playlists
 
 ## Installation
 
-1. Install a userscript manager extension:
+1. Install a userscript manager:
    - [ViolentMonkey](https://violentmonkey.github.io/) (recommended)
    - [TamperMonkey](https://www.tampermonkey.net/)
    - [GreaseMonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/)
-   
-2. Add the script through your userscript manager.
+2. Add this script to your userscript manager.
 
 ## Usage
 
-1. Navigate to any YouTube playlist
-2. The sort controls will appear above the playlist 
-3. Select your preferred sort order (shortest/longest)
-4. Click "Sort Videos" to begin sorting
-5. Wait for the process to complete
+1. Open any YouTube playlist
+2. The sorting controls will appear above the playlist
+3. Choose your preferred sort order (shortest or longest first)
+4. Click "Sort Videos" to start
+5. Sit back and wait for the sorting to finish
 
 ## Contributing
 
-Contributors welcome! There are edge cases I cannot handle quickly especially in non-Chromium engines.
+Contributions are welcome! There are still edge cases, especially on non-Chromium browsers, that need attention.
 
-My setup is ViolentMonkey on Chromium. Volunteers are encouraged to test on alternative platforms.
+My main setup is ViolentMonkey on Chromium, but testing and fixes for other platforms are appreciated.
 
-If you'd like to contribute:
-1. Fork the repository
-2. Create your feature branch
-3. Submit a pull request
+To contribute:
+1. Fork this repository
+2. Create a feature branch
+3. Open a pull request
 
 ## Known Issues
 
 ### TamperMonkey 5.1.0, Chrome Canary 124
 
-If you experience issues with this combination, try one of these solutions:
-1. Go to TM settings, change from Novice to Advanced, scroll down to Experimental and **switch Inject mode to Instant**
-2. Go to [Chrome Experiments](chrome://flags/), enable `Enable (deprecated) synchronous mutation events` and restart Chrome.
-3. Reinstall Chrome completely, removing previous browsing data
+If you run into problems with this setup, try:
+1. In TamperMonkey settings, switch from Novice to Advanced, scroll to Experimental, and set **Inject mode to Instant**
+2. In [Chrome Experiments](chrome://flags/), enable `Enable (deprecated) synchronous mutation events` and restart Chrome
+3. Fully reinstall Chrome, clearing all browsing data
 
 ### Large Playlists
 
-For very large playlists (500+ videos), sorting may take a while and could be resource-intensive. The script uses adaptive delays to balance performance and reliability.
+Sorting very large playlists (500+ videos) may take longer and use more resources. The script uses adaptive delays to help balance speed and reliability.
 
 ## License
 
 GPL-2.0
+

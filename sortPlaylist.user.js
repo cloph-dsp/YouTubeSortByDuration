@@ -4,7 +4,7 @@
 // ==UserScript==
 // @name              YT Playlist Sorter
 // @namespace         https://github.com/cloph-dsp/SortYoutubePlaylistByDuration
-// @version           4.0
+// @version           4.2
 // @description       Sorts YouTube WL playlists by video duration
 // @author            cloph-dsp
 // @originalAuthor    KohGeek
@@ -18,77 +18,85 @@
 
 // CSS styles
 const css = `
-        .sort-playlist-div {
-            font-size: 12px;
-            padding: 3px 1px;
-            display: flex;
-            align-items: center;
-        }
-        .sort-playlist {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .sort-playlist-controls {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .sort-button-toggle {
-            border: 1px solid #a0a0a0;
-            border-radius: 4px;
-            padding: 8px 16px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            transition: all 0.2s ease;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-        .sort-button-start {
-            background-color: #30d030;
-            color: white;
-        }
-        .sort-button-stop {
-            background-color: #d03030;
-            color: white;
-        }
-        .sort-button-start:hover {
-            background-color: #28b828;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-        .sort-button-stop:hover {
-            background-color: #b82828;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-        .sort-select {
-            border: 1px solid #a0a0a0;
-            border-radius: 4px;
-            padding: 8px 12px;
-            font-size: 14px;
-            background-color: #f8f8f8;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .sort-select:hover {
-            border-color: #666;
-            background-color: #f0f0f0;
-        }
-        .sort-select:focus {
-            outline: none;
-            border-color: #30d030;
-            box-shadow: 0 0 0 2px rgba(48, 208, 48, 0.2);
-        }
-        .sort-log {
-            padding: 8px;
-            margin-top: 8px;
-            border-radius: 5px;
-            background-color: #202020;
-            color: #e0e0e0;
-            font-size: 13px;
-        }
-    `
+    /* Container wrapper */
+    .sort-playlist {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 16px;
+        padding: 12px;
+        background-color: var(--yt-spec-base-background);
+        border-bottom: 1px solid var(--yt-spec-10-percent-layer);
+        width: 100%;
+        box-sizing: border-box;
+    }
+    /* Controls grouping */
+    .sort-playlist-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    /* Sort button wrapper */
+    #sort-toggle-button {
+        padding: 8px 16px;
+        font-size: 14px;
+        white-space: nowrap;
+        cursor: pointer;
+        background: none;
+        outline: none;
+    }
+    /* Start (green) state */
+    .sort-button-start {
+        background-color: #28a745;
+        color: #fff;
+        border: 1px solid #28a745;
+        border-radius: 4px;
+        transition: background-color 0.3s, transform 0.2s;
+    }
+    .sort-button-start:hover {
+        background-color: #218838;
+        transform: translateY(-1px);
+    }
+    /* Stop (red) state */
+    .sort-button-stop {
+        background-color: #dc3545;
+        color: #fff;
+        border: 1px solid #dc3545;
+        border-radius: 4px;
+        transition: background-color 0.3s, transform 0.2s;
+    }
+    .sort-button-stop:hover {
+        background-color: #c82333;
+        transform: translateY(-1px);
+    }
+    /* Dropdown selector styling */
+    .sort-select {
+        padding: 6px 12px;
+        font-size: 14px;
+        border: 1px solid var(--yt-spec-10-percent-layer);
+        border-radius: 4px;
+        background-color: var(--yt-spec-base-background);
+        color: var(--yt-spec-text-primary); /* ensure text is visible */
+        transition: border-color 0.2s;
+    }
+    .sort-select option { color: var(--yt-spec-text-primary); }
+    .sort-select:focus {
+        border-color: var(--yt-spec-brand-link-text);
+        box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.3);
+        outline: none;
+    }
+    /* Status log element */
+    .sort-log {
+        margin-left: auto;
+        padding: 6px 12px;
+        font-size: 13px;
+        background-color: var(--yt-spec-base-background);
+        border: 1px solid var(--yt-spec-10-percent-layer);
+        border-radius: 4px;
+        color: var(--yt-spec-text-primary);
+        white-space: nowrap;
+    }
+`
 
 const modeAvailable = [
     { value: 'asc', label: 'by Shortest' },
@@ -161,57 +169,18 @@ let simulateDrag = (elemDrag, elemDrop) => {
 
 // Scroll to position or page bottom
 let autoScroll = async (scrollTop = null) => {
-    let element = document.scrollingElement;
-    let scrollDestination = scrollTop !== null ? scrollTop : element.scrollHeight;
-    let startPosition = element.scrollTop;
-
+    const element = document.scrollingElement;
+    const destination = scrollTop !== null ? scrollTop : element.scrollHeight;
+    element.scrollTop = destination;
     logActivity(`Scrolling page... 📜`);
-    
-    // Use stepped approach for longer scrolls
-    if (Math.abs(startPosition - scrollDestination) > 3000) {
-        const totalSteps = 4;
-        const stepSize = (scrollDestination - startPosition) / totalSteps;
-        
-        for (let i = 1; i <= totalSteps && !stopSort; i++) {
-            const intermediatePosition = startPosition + (stepSize * i);
-            
-            element.scrollTo({
-                top: intermediatePosition,
-                behavior: 'smooth'
-            });
-            
-            await new Promise(r => setTimeout(r, Math.max(350, scrollLoopTime * 0.5)));
-        }
-        
-        // Final adjustment
-        if (Math.abs(element.scrollTop - scrollDestination) > 50 && !stopSort) {
-            element.scrollTop = scrollDestination;
-            await new Promise(r => setTimeout(r, Math.max(500, scrollLoopTime * 0.6)));
-        }
-    } else {
-        // For shorter distances
-        try {
-            element.scrollTo({
-                top: scrollDestination,
-                behavior: 'smooth'
-            });
-            
-            await new Promise(r => setTimeout(r, Math.max(350, scrollLoopTime * 0.6)));
-            
-            if (Math.abs(element.scrollTop - scrollDestination) > 50 && !stopSort) {
-                element.scrollTop = scrollDestination;
-                await new Promise(r => setTimeout(r, Math.max(450, scrollLoopTime * 0.7)));
-            }
-        } catch (e) {
-            element.scrollTop = scrollDestination;
-            await new Promise(r => setTimeout(r, Math.max(550, scrollLoopTime * 0.8)));
-        }
-    }
+    await new Promise(r => setTimeout(r, scrollLoopTime));
 };
 
 // Log message to UI
 let logActivity = (message) => {
-    log.innerText = message;
+    if (log) {
+        log.innerText = message;
+    }
     if (debug) {
         console.log(message);
     }
@@ -219,16 +188,27 @@ let logActivity = (message) => {
 
 // Create UI container
 let renderContainerElement = () => {
-    const element = document.createElement('div')
-    element.className = 'sort-playlist sort-playlist-div'
-    element.style.paddingBottom = '16px'
+    // Remove old container if any
+    const existing = document.querySelector('.sort-playlist');
+    if (existing) existing.remove();
 
-    const controlsContainer = document.createElement('div')
-    controlsContainer.className = 'sort-playlist-controls'
-    element.appendChild(controlsContainer)
+    // Create new container
+    const element = document.createElement('div');
+    element.className = 'sort-playlist';
+    element.style.margin = '8px 0';
 
-    document.querySelector('div.thumbnail-and-metadata-wrapper').append(element)
-}
+    const controls = document.createElement('div');
+    controls.className = 'sort-playlist-controls';
+    element.appendChild(controls);
+
+    // Insert above playlist video list
+    const list = document.querySelector('ytd-playlist-video-list-renderer');
+    if (list && list.parentNode) {
+        list.parentNode.insertBefore(element, list);
+    } else {
+        console.error('Playlist video list not found for UI injection');
+    }
+};
 
 // Create sort toggle button
 let renderToggleButton = () => {
@@ -447,9 +427,9 @@ let isPlaylistFullyLoaded = (reportedCount, loadedCount) => {
 
 // Check if YouTube page is ready
 let isYouTubePageReady = () => {
-    const playlistContainer = document.querySelector("ytd-item-section-renderer:first-of-type");
-    const videoCount = document.querySelector(".metadata-stats span.yt-formatted-string:first-of-type");
-    const dragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
+    const playlistContainer = document.querySelector("ytd-playlist-video-list-renderer");
+    const videoCountElement = document.querySelector("ytd-playlist-sidebar-primary-info-renderer #stats span:first-child");
+    const dragPoints = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder") : [];
     
     // Spinner detection
     const spinnerElements = document.querySelectorAll('.ytd-continuation-item-renderer, yt-icon-button.ytd-continuation-item-renderer, .circle.ytd-spinner');
@@ -459,12 +439,12 @@ let isYouTubePageReady = () => {
                 rect.top >= 0 && rect.top <= window.innerHeight);
     });
     
-    const reportedCount = videoCount ? Number(videoCount.innerText) : 0;
+    const reportedCount = videoCountElement ? parseInt(videoCountElement.innerText, 10) : 0;
     const loadedCount = dragPoints.length;
     const youtubeLoadLimit = 100;
     
     // Check readiness
-    const basicElementsReady = playlistContainer && videoCount && loadedCount > 0;
+    const basicElementsReady = playlistContainer && videoCountElement && reportedCount > 0 && loadedCount > 0;
     const hasEnoughVideos = loadedCount >= 95 || loadedCount === reportedCount;
     const fullyLoaded = (!hasVisibleSpinner && hasEnoughVideos) || 
                          (loadedCount >= 0.97 * Math.min(reportedCount, youtubeLoadLimit));
@@ -474,89 +454,76 @@ let isYouTubePageReady = () => {
     // Show status
     if (isReady) {
         if (loadedCount < reportedCount) {
-            logActivity(`✅ Ready: ${loadedCount}/${reportedCount} videos (YouTube limit reached)`);
+            logActivity(`✅ Ready: ${loadedCount}/${reportedCount} videos (YT limit)`);
         } else {
             logActivity(`✅ Ready: ${loadedCount}/${reportedCount} videos`);
         }
     } else if (basicElementsReady) {
         if (hasVisibleSpinner) {
             logActivity(`⏳ Loading: ${loadedCount}/${reportedCount} videos`);
-        } else if (loadedCount < reportedCount) {
-            logActivity(`⚠️ Some videos unavailable: ${loadedCount}/${reportedCount}`);
+        } else if (loadedCount < reportedCount && loadedCount > 0) {
+            logActivity(`🔄 Waiting to scroll: ${loadedCount}/${reportedCount} videos`);
         } else {
-            logActivity(`⌛ Waiting: ${loadedCount} videos`);
+            logActivity(`🔄 Waiting: ${loadedCount}/${reportedCount || '?'} videos`);
         }
     } else {
-        logActivity(`🔄 Waiting: ${loadedCount}/${reportedCount || '?'} videos`);
+        logActivity(`🔄 Initializing...`);
     }
     return isReady;
 };
 
-// Sort videos by duration
-let sortVideos = (allAnchors, allDragPoints, expectedCount) => {
-    let videos = [];
-    let sorted = 0;
-    let dragged = false;
-    
+let sortVideos = async (allAnchors, allDragPoints, expectedCount) => {
+    // Verify playlist fully loaded
     if (allDragPoints.length !== expectedCount || allAnchors.length !== expectedCount) {
         logActivity("Playlist not fully loaded, waiting...");
-        return 0;
+        return -1;
     }
-    
-    // Get duration for each video
-    for (let j = 0; j < allDragPoints.length; j++) {
-        let thumb = allAnchors[j];
-        let drag = allDragPoints[j];
-        let timeSpan = thumb.querySelector("#text");
-        let timeDigits = timeSpan.innerText.trim().split(":").reverse();
-        let time;
-        if (timeDigits.length == 1) {
-            sortMode == "asc" ? time = 999999999999999999 : time = -1;
-        } else {
-            time = parseInt(timeDigits[0]);
-            if (timeDigits[1]) time += parseInt(timeDigits[1]) * 60;
-            if (timeDigits[2]) time += parseInt(timeDigits[2]) * 3600;
-        }
-        videos.push({ anchor: drag, time: time, originalIndex: j });
+    // Build list of current handles with durations
+    let list = [];
+    for (let i = 0; i < expectedCount; i++) {
+        // Handle missing duration text gracefully
+        const txtElem = allAnchors[i].querySelector('#text');
+        let timeSp = txtElem ? txtElem.innerText.trim().split(':').reverse() : [''];
+        let t = timeSp.length === 1 ? (sortMode === 'asc' ? Infinity : -Infinity)
+                : parseInt(timeSp[0]) + (timeSp[1] ? parseInt(timeSp[1]) * 60 : 0) + (timeSp[2] ? parseInt(timeSp[2]) * 3600 : 0);
+        list.push({ handle: allDragPoints[i], time: t });
     }
-    
-    // Sort by duration
-    if (sortMode == "asc") {
-        videos.sort((a, b) => a.time - b.time);
-    } else {
-        videos.sort((a, b) => b.time - a.time);
-    }
-    
-    // Drag operations
-    for (let j = 0; j < videos.length; j++) {
-        let originalIndex = videos[j].originalIndex;
-
-        if (debug) {
-            console.log("Loaded: " + videos.length + ". Current: " + j + ". Original: " + originalIndex + ".");
-        }
-
-        if (originalIndex !== j) {
-            let elemDrag = videos[j].anchor;
-            let elemDrop = videos.find((v) => v.originalIndex === j).anchor;
-
-            logActivity("Drag " + originalIndex + " to " + j);
-            simulateDrag(elemDrag, elemDrop);
-            dragged = true;
-        }
-
-        sorted = j;
-
-        if (stopSort || dragged) {
-            break;
+    // Create sorted reference
+    let sorted = [...list];
+    sorted.sort((a, b) => sortMode === 'asc' ? a.time - b.time : b.time - a.time);
+    // Find first mismatch and move
+    for (let i = 0; i < expectedCount; i++) {
+        if (list[i].handle !== sorted[i].handle) {
+            let elemDrag = sorted[i].handle;
+            let elemDrop = list[i].handle;
+            logActivity(`Dragging video to position ${i}`);
+            try {
+                simulateDrag(elemDrag, elemDrop);
+                if (useAdaptiveDelay && expectedCount > fastModeThreshold) {
+                    // Fast static delay for large playlists
+                    await new Promise(r => setTimeout(r, 100));
+                } else {
+                    await waitForYoutubeProcessing();
+                }
+            } catch (e) {
+                console.error('Drag error:', e);
+                logActivity('Error during move; retrying slowly... ⏳');
+                // Fallback delay and retry
+                await new Promise(r => setTimeout(r, scrollLoopTime));
+            }
+             // Return number of sorted items (index+1) to signal success
+             return i + 1;
         }
     }
-
-    return sorted;
+    // All in order
+    return expectedCount;
 }
 
 // Main sorting function
 let activateSort = async () => {
-    // Set manual sorting mode
+    // Reset scroll cap
+    autoScrollAttempts = 0;
+     // Set manual sorting mode
     const ensureManualSort = async () => {
         const sortButton = document.querySelector('yt-dropdown-menu[icon-label="Ordenar"] tp-yt-paper-button, yt-dropdown-menu[icon-label="Sort"] tp-yt-paper-button');
         if (!sortButton) {
@@ -638,8 +605,10 @@ let activateSort = async () => {
     };
 
     const manualSortSet = await ensureManualSort();
-    let reportedVideoCount = Number(document.querySelector(".metadata-stats span.yt-formatted-string:first-of-type").innerText);
-    let allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
+    const videoCountElement = document.querySelector("ytd-playlist-sidebar-primary-info-renderer #stats span:first-child");
+    let reportedVideoCount = videoCountElement ? parseInt(videoCountElement.innerText, 10) : 0;
+    const playlistContainer = document.querySelector("ytd-playlist-video-list-renderer");
+    let allDragPoints = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder") : [];
     let allAnchors;
     
     // Set optimal delay based on playlist size
@@ -669,36 +638,43 @@ let activateSort = async () => {
     let scrollRetryCount = 0;
     stopSort = false;
     let consecutiveRecoveryFailures = 0;
+    let sortFailureCount = 0; // count sortVideos failures
 
     // Load all videos
-    while (reportedVideoCount !== initialVideoCount
-        && document.URL.includes("playlist?list=")
-        && stopSort === false
-        && autoScrollInitialVideoList === true) {
-        logActivity(`Loading videos (${allDragPoints.length}/${reportedVideoCount})`);
-        if (scrollRetryCount > 5) {
-            break;
-        } else if (scrollRetryCount > 0) {
-            logActivity(`Some videos may be unavailable. Attempt: ${scrollRetryCount}/5`);
-        }
-        
-        // Show appropriate warning based on playlist size
-        if (allDragPoints.length > 600) {
-            logActivity(`${allDragPoints.length} videos - large playlist warning (may take several minutes)`);
-        } else if (allDragPoints.length > 300) {
-            logActivity(`${allDragPoints.length} videos - this may take a while`);
-        }
-        
-        await autoScroll();
-        allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-        initialVideoCount = allDragPoints.length;
+    if (reportedVideoCount > allDragPoints.length && autoScrollInitialVideoList) {
+        logActivity(`Playlist has ${reportedVideoCount} videos. Loading all...`);
+        while (allDragPoints.length < reportedVideoCount && !stopSort && scrollRetryCount < 10) {
+            await autoScroll();
+            let newDragPoints = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder") : [];
+            
+            if (newDragPoints.length > allDragPoints.length) {
+                allDragPoints = newDragPoints;
+                scrollRetryCount = 0; // Reset on progress
+                logActivity(`Loading videos (${allDragPoints.length}/${reportedVideoCount})`);
+            } else {
+                scrollRetryCount++;
+                logActivity(`Scroll attempt ${scrollRetryCount}/10...`);
+                await new Promise(r => setTimeout(r, 500 + scrollRetryCount * 100));
+            }
 
-        if (((reportedVideoCount - initialVideoCount) / 10) < 1) {
-            scrollRetryCount++;
+            // Check for spinner
+            const spinner = document.querySelector('.ytd-continuation-item-renderer');
+            if (!spinner && allDragPoints.length < reportedVideoCount) {
+                logActivity(`No spinner found, but not all videos loaded. Retrying...`);
+                await new Promise(r => setTimeout(r, 1000));
+            } else if (!spinner) {
+                break; // Exit if no spinner and no new videos
+            }
         }
     }
-    logActivity(initialVideoCount + " videos loaded.");
-    if (scrollRetryCount > 5) logActivity(log.innerText + "\nMax scroll attempts reached. Proceeding with available videos.");
+
+
+    initialVideoCount = allDragPoints.length;
+    logActivity(initialVideoCount + " videos loaded for sorting.");
+    if (scrollRetryCount >= 10) {
+        logActivity("Max scroll attempts reached. Proceeding with available videos.");
+    }
+    
     let loadedLocation = document.scrollingElement.scrollTop;
     scrollRetryCount = 0;
 
@@ -712,7 +688,22 @@ let activateSort = async () => {
         return;
     }
     
+    // Stall detection: break if no progress after multiple cycles
+    let lastSortedCount = -1;
+    let stallCount = 0;
     while (sortedCount < initialVideoCount && stopSort === false) {
+        if (sortedCount === lastSortedCount) {
+            stallCount++;
+        } else {
+            stallCount = 0;
+            lastSortedCount = sortedCount;
+        }
+        if (stallCount >= 3) {
+            logActivity('No further progress; ending sort to avoid hang');
+            break;
+        }
+        
+        sortFailureCount = 0;
         // Check timeout
         if (Date.now() - sortStartTime > maxSortTime) {
             logActivity("Sorting timed out after 15 minutes.");
@@ -725,41 +716,46 @@ let activateSort = async () => {
             await new Promise(r => setTimeout(r, 1500));
             consecutiveRecoveryFailures = 0;
         }
-        allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-        allAnchors = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
+        allDragPoints = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder") : [];
+        allAnchors = playlistContainer ? playlistContainer.querySelectorAll("div#content a#thumbnail.inline-block.ytd-thumbnail") : [];
         scrollRetryCount = 0;
 
-        // Ensure durations loaded
-        while (!allAnchors[initialVideoCount - 1]?.querySelector("#text") && stopSort === false) {
-            if (document.scrollingElement.scrollTop < loadedLocation && scrollRetryCount < 3) {
-                logActivity(`Loading details... (${sortedCount + 1}/${initialVideoCount})`);
-                await autoScroll(loadedLocation);
-                scrollRetryCount++;
-            } else {
-                logActivity(`Scrolling for content...`);
-                await autoScroll();
-            }
+        // Ensure durations loaded (up to 3 auto-scroll attempts)
+        let detailRetries = 0;
+        while (!allAnchors[initialVideoCount - 1]?.querySelector("#text") && !stopSort && detailRetries < 3) {
+            logActivity(`Loading video details... attempt ${detailRetries + 1}`);
+            await autoScroll();
             // Refresh references
-            allDragPoints = document.querySelectorAll("ytd-item-section-renderer:first-of-type yt-icon#reorder");
-            allAnchors = document.querySelectorAll("ytd-item-section-renderer:first-of-type div#content a#thumbnail.inline-block.ytd-thumbnail");
-            if (allAnchors.length === 0 || allDragPoints.length === 0) {
-                logActivity("Lost video references. Waiting...");
-                await new Promise(r => setTimeout(r, 1000));
-            }
+            allDragPoints = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder") : [];
+            allAnchors = playlistContainer ? playlistContainer.querySelectorAll("div#content a#thumbnail.inline-block.ytd-thumbnail") : [];
+            detailRetries++;
+        }
+        if (detailRetries >= 3) {
+            logActivity("Proceeding without full duration details...");
+            // Update expected count to actual loaded elements to avoid sort blocking
+            initialVideoCount = allAnchors.length;
+            allDragPoints = playlistContainer.querySelectorAll("yt-icon#reorder");
         }
 
-        // Sort if elements available
-        if (allAnchors.length > 0 && allDragPoints.length > 0) {
-            sortedCount = Number(sortVideos(allAnchors, allDragPoints, initialVideoCount) + 1);
-            const processingSuccessful = await waitForYoutubeProcessing();
-            if (!processingSuccessful) {
-                logActivity("Recovery failed - waiting...");
-                consecutiveRecoveryFailures++;
-                await new Promise(r => setTimeout(r, 1000 + (consecutiveRecoveryFailures * 300)));
+         // Sort if elements available
+         if (allAnchors.length > 0 && allDragPoints.length > 0) {
+            // Perform sorting; negative indicates missing durations
+            const res = await sortVideos(allAnchors, allDragPoints, initialVideoCount);
+            if (res < 0) {
+                sortFailureCount++;
+                if (sortFailureCount >= 3) {
+                    logActivity('Unable to load durations after multiple attempts; aborting sort');
+                    sortedCount = initialVideoCount;
+                    break;
+                }
+                logActivity(`Retrying due to missing data (${sortFailureCount}/3)...`);
+                await autoScroll();
+                await new Promise(r => setTimeout(r, 1000));
                 continue;
-            } else {
-                consecutiveRecoveryFailures = 0;
             }
+             // Successful move
+             sortedCount = res;
+             consecutiveRecoveryFailures = 0;
         } else {
             logActivity("No video elements. Waiting...");
             await new Promise(r => setTimeout(r, 1500));
@@ -773,26 +769,30 @@ let activateSort = async () => {
         stopSort = false;
     } else {
         logActivity(`Sorting complete ✓ (${sortedCount} videos)`);
+        // Scroll to top to ensure the completion message is visible
+        document.scrollingElement.scrollTo({ top: 0, behavior: 'smooth' });
     }
 };
 
 // Initialize UI
 let init = () => {
-    onElementReady('div.thumbnail-and-metadata-wrapper', false, () => {
+    onElementReady('ytd-playlist-video-list-renderer', false, () => {
+        // Avoid duplicate
+        if (document.querySelector('.sort-playlist')) return;
+
         autoScrollInitialVideoList = true;
         useAdaptiveDelay = true;
-        
-        renderContainerElement();
+
         addCssStyle();
+        renderContainerElement();
         renderToggleButton();
         renderSelectElement(0, modeAvailable, 'Sort Order');
         renderLogElement();
-        
-        // Check page loading
-        const checkPageInterval = setInterval(() => {
+
+        const checkInterval = setInterval(() => {
             if (isYouTubePageReady()) {
-                logActivity("✓ Ready to sort");
-                clearInterval(checkPageInterval);
+                logActivity('✓ Ready to sort');
+                clearInterval(checkInterval);
             }
         }, 1000);
     });
@@ -801,8 +801,12 @@ let init = () => {
 // Initialize script
 (() => {
     init();
-    navigation.addEventListener('navigate', navigateEvent => {
-        const url = new URL(navigateEvent.destination.url);
-        if (url.pathname.includes('playlist?')) init();
-    });
+    // Re-init UI on in-app navigation (guard for browsers without navigation API)
+    if (window.navigation && typeof navigation.addEventListener === 'function') {
+        navigation.addEventListener('navigate', () => {
+            setTimeout(() => {
+                if (!document.querySelector('.sort-playlist')) init();
+            }, 500);
+        });
+    }
 })();
