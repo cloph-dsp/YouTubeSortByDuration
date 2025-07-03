@@ -1,5 +1,7 @@
 # 🔀 YouTubeSortByDuration 🚀
 
+**Forked from [KohGeek/SortYoutubePlaylistByDuration](https://github.com/KohGeek/SortYoutubePlaylistByDuration)** — improved UI, speed, and compatibility.
+
 [![ViolentMonkey Compatible](https://img.shields.io/badge/ViolentMonkey-OK-brightgreen)](https://violentmonkey.github.io/)
 [![Tampermonkey Compatible](https://img.shields.io/badge/Tampermonkey-OK-blue)](https://www.tampermonkey.net/)
 [![GPL-2.0 License](https://img.shields.io/badge/License-GPL%202.0-blue.svg)](LICENSE)
