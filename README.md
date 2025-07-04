@@ -4,6 +4,7 @@
 
 [![ViolentMonkey Compatible](https://img.shields.io/badge/ViolentMonkey-OK-brightgreen)](https://violentmonkey.github.io/)
 [![Tampermonkey Compatible](https://img.shields.io/badge/Tampermonkey-OK-blue)](https://www.tampermonkey.net/)
+[![Install from Greasy Fork](https://img.shields.io/badge/Install%20from-Greasy%20Fork-darkgreen.svg)](https://greasyfork.org/en/scripts/530129-yt-playlist-sorter)
 [![GPL-2.0 License](https://img.shields.io/badge/License-GPL%202.0-blue.svg)](LICENSE)
 
 ## Overview
@@ -24,23 +25,17 @@ YouTubeSortByDuration is the ultimate YouTube userscript that supercharges your 
 
 ## 📦 Installation
 
-1. Install a userscript manager:
-   - [ViolentMonkey](https://violentmonkey.github.io/) (recommended)
-   - [Tampermonkey](https://www.tampermonkey.net/)
-   - [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/)
-2. Add the `sortPlaylist.user.js` script to your userscript manager.
-3. Enable the script and open any YouTube playlist to see the controls appear.
+1. Install a userscript manager like [ViolentMonkey](https://violentmonkey.github.io/) or [Tampermonkey](https://www.tampermonkey.net/).
+2. Install the script from **[Greasy Fork](https://greasyfork.org/en/scripts/530129-yt-playlist-sorter)**.
+3. Open a YouTube playlist, and the sort controls will appear automatically.
 
 ---
 
 ## 🚀 Usage
 
 1. Open a YouTube playlist.
-2. Click the **⚙️ Sort** button above the playlist controls.
-3. Choose your sort order:
-   - 📈 Longest first
-   - 📉 Shortest first
-4. Click **Sort Videos** and enjoy! 🪄
+2. Select a sort order (`by Longest` or `by Shortest`).
+3. Click **Sort Videos** to begin.
 
 ---
 
@@ -54,8 +49,3 @@ Contributions, bug reports, and feature requests are welcome! Please fork the re
 
 - **Tampermonkey 5.1.0 & Chrome Canary 124**: If you encounter issues, set Inject Mode to *Instant* and enable synchronous mutation events.
 - **Large Playlists (500+ videos)**: Sorting may take longer due to adaptive delays for reliability.
-
----
-
-© 2025 YouTubeSortByDuration | Licensed under [GPL-2.0](LICENSE)
-
