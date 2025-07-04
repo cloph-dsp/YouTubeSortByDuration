@@ -5,7 +5,7 @@
 // @name              YT Playlist Sorter
 // @namespace         https://github.com/cloph-dsp/SortYoutubePlaylistByDuration
 // @version           4.2
-// @description       Sorts YouTube WL playlists by video duration
+// @description       Sorts YouTube playlists by video duration
 // @author            cloph-dsp
 // @originalAuthor    KohGeek
 // @license           GPL-2.0-only
