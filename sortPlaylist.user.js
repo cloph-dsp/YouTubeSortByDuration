@@ -2,13 +2,15 @@
 
 /* jshint esversion: 8 */
 // ==UserScript==
-// @name              YT Playlist Sorter
-// @namespace         https://github.com/cloph-dsp/SortYoutubePlaylistByDuration
+// @name              YouTubeSortByDuration
+// @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
 // @version           4.2
-// @description       Sorts YouTube playlists by video duration
+// @description       Supercharges your playlist management by sorting videos by duration.
 // @author            cloph-dsp
 // @originalAuthor    KohGeek
 // @license           GPL-2.0-only
+// @homepageURL       https://github.com/cloph-dsp/YouTubeSortByDuration
+// @supportURL        https://github.com/cloph-dsp/YouTubeSortByDuration/issues
 // @match             http://*.youtube.com/*
 // @match             https://*.youtube.com/*
 // @require           https://greasyfork.org/scripts/374849-library-onelementready-es7/code/Library%20%7C%20onElementReady%20ES7.js
