@@ -4,7 +4,7 @@
 // ==UserScript==
 // @name              YouTubeSortByDuration
 // @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
-// @version           4.2
+// @version           4.3
 // @description       Supercharges your playlist management by sorting videos by duration.
 // @author            cloph-dsp
 // @originalAuthor    KohGeek
