@@ -111,10 +111,11 @@ const debug = false;
 let isSorting = false;
 let scrollLoopTime = 500;
 let useAdaptiveDelay = true;
-let baseDelayPerVideo = 5;
-let minDelay = 10;
-let maxDelay = 1000;
-let fastModeThreshold = 200;
+let baseDelayPerVideo = 8; // Increased from 5 to reduce rate limiting
+let minDelay = 100; // Increased from 10 to prevent "sorry but an error occurred"
+let maxDelay = 2000; // Increased from 1000 for better stability
+let fastModeThreshold = 150; // Reduced from 200 to be more conservative
+let autoScrollAttempts = 0; // Fix undefined variable
 
 let sortMode = 'asc';
 let autoScrollInitialVideoList = true;
@@ -441,7 +442,7 @@ let isYouTubePageReady = () => {
                 rect.top >= 0 && rect.top <= window.innerHeight);
     });
     
-    const reportedCount = videoCountElement ? parseInt(videoCountElement.innerText, 10) : 0;
+    const reportedCount = videoCountElement ? parseInt(videoCountElement.innerText.replace(/[^\d]/g, ''), 10) : 0;
     const loadedCount = dragPoints.length;
     const youtubeLoadLimit = 100;
     
@@ -500,18 +501,36 @@ let sortVideos = async (allAnchors, allDragPoints, expectedCount) => {
             let elemDrop = list[i].handle;
             logActivity(`Dragging video to position ${i}`);
             try {
+                // Check for YouTube errors before proceeding
+                const errorElements = document.querySelectorAll('[role="alert"], .error-message, .yt-alert-message');
+                if (errorElements.length > 0) {
+                    const errorText = Array.from(errorElements).map(el => el.textContent.toLowerCase()).join(' ');
+                    if (errorText.includes('error') || errorText.includes('sorry')) {
+                        logActivity('YouTube error detected, waiting longer...');
+                        await new Promise(r => setTimeout(r, 3000));
+                        return -1; // Signal to retry
+                    }
+                }
+
                 simulateDrag(elemDrag, elemDrop);
+                
+                // Always use conservative delays to prevent rate limiting
                 if (useAdaptiveDelay && expectedCount > fastModeThreshold) {
-                    // Fast static delay for large playlists
-                    await new Promise(r => setTimeout(r, 100));
+                    // Increased delay for large playlists to prevent 409 errors
+                    await new Promise(r => setTimeout(r, Math.max(200, minDelay)));
                 } else {
                     await waitForYoutubeProcessing();
                 }
+                
+                // Additional validation delay after drag
+                await new Promise(r => setTimeout(r, 100));
+                
             } catch (e) {
                 console.error('Drag error:', e);
                 logActivity('Error during move; retrying slowly... ⏳');
-                // Fallback delay and retry
-                await new Promise(r => setTimeout(r, scrollLoopTime));
+                // Longer fallback delay to avoid rapid retries
+                await new Promise(r => setTimeout(r, Math.max(scrollLoopTime * 2, 1500)));
+                return -1; // Signal to retry
             }
              // Return number of sorted items (index+1) to signal success
              return i + 1;
@@ -523,8 +542,10 @@ let sortVideos = async (allAnchors, allDragPoints, expectedCount) => {
 
 // Main sorting function
 let activateSort = async () => {
-    // Reset scroll cap
+    // Reset scroll cap and add error tracking
     autoScrollAttempts = 0;
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 5;
      // Set manual sorting mode
     const ensureManualSort = async () => {
         const sortButton = document.querySelector('yt-dropdown-menu[icon-label="Ordenar"] tp-yt-paper-button, yt-dropdown-menu[icon-label="Sort"] tp-yt-paper-button');
@@ -608,7 +629,7 @@ let activateSort = async () => {
 
     const manualSortSet = await ensureManualSort();
     const videoCountElement = document.querySelector("ytd-playlist-sidebar-primary-info-renderer #stats span:first-child");
-    let reportedVideoCount = videoCountElement ? parseInt(videoCountElement.innerText, 10) : 0;
+    let reportedVideoCount = videoCountElement ? parseInt(videoCountElement.innerText.replace(/[^\d]/g, ''), 10) : 0;
     const playlistContainer = document.querySelector("ytd-playlist-video-list-renderer");
     let allDragPoints = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder") : [];
     let allAnchors;
@@ -624,12 +645,12 @@ let activateSort = async () => {
             let videoCount = reportedVideoCount || allDragPoints.length;
             
             if (videoCount <= fastModeThreshold) {
-                let fastDelay = Math.max(75, baseDelayPerVideo * Math.sqrt(videoCount * 0.75));
-                scrollLoopTime = Math.min(fastDelay, 350);
+                let fastDelay = Math.max(200, baseDelayPerVideo * Math.sqrt(videoCount * 1.2)); // More conservative
+                scrollLoopTime = Math.min(fastDelay, 500); // Increased minimum
                 logActivity(`Using fast mode: ${scrollLoopTime}ms}`);
             } else {
-                let calculatedDelay = Math.max(100, baseDelayPerVideo * Math.log(videoCount) * 2.5);
-                scrollLoopTime = Math.min(calculatedDelay, 800);
+                let calculatedDelay = Math.max(300, baseDelayPerVideo * Math.log(videoCount) * 3.5); // More conservative
+                scrollLoopTime = Math.min(calculatedDelay, 1200); // Increased maximum
                 logActivity(`Using adaptive delay: ${scrollLoopTime}ms}`);
             }
         }
@@ -739,9 +760,24 @@ let activateSort = async () => {
             allDragPoints = playlistContainer.querySelectorAll("yt-icon#reorder");
         }
 
+         // Check for YouTube errors before sorting
+         const errorCheck = document.querySelector('[role="alert"], .error-message');
+         if (errorCheck && errorCheck.textContent.toLowerCase().includes('error')) {
+             consecutiveErrors++;
+             if (consecutiveErrors >= maxConsecutiveErrors) {
+                 logActivity('Too many YouTube errors. Stopping sort to prevent issues.');
+                 break;
+             }
+             logActivity(`YouTube error detected. Waiting... (${consecutiveErrors}/${maxConsecutiveErrors})`);
+             await new Promise(r => setTimeout(r, 5000));
+             continue;
+         } else {
+             consecutiveErrors = 0;
+         }
+
          // Sort if elements available
          if (allAnchors.length > 0 && allDragPoints.length > 0) {
-            // Perform sorting; negative indicates missing durations
+            // Perform sorting; negative indicates missing durations or errors
             const res = await sortVideos(allAnchors, allDragPoints, initialVideoCount);
             if (res < 0) {
                 sortFailureCount++;
@@ -750,9 +786,10 @@ let activateSort = async () => {
                     sortedCount = initialVideoCount;
                     break;
                 }
-                logActivity(`Retrying due to missing data (${sortFailureCount}/3)...`);
+                logActivity(`Retrying due to missing data or errors (${sortFailureCount}/3)...`);
                 await autoScroll();
-                await new Promise(r => setTimeout(r, 1000));
+                // Longer wait after errors to prevent rate limiting
+                await new Promise(r => setTimeout(r, 2000 + sortFailureCount * 1000));
                 continue;
             }
              // Successful move
@@ -760,7 +797,7 @@ let activateSort = async () => {
              consecutiveRecoveryFailures = 0;
         } else {
             logActivity("No video elements. Waiting...");
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 2000)); // Increased wait time
             consecutiveRecoveryFailures++;
         }
     }
