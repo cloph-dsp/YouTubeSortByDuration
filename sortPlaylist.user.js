@@ -5,8 +5,7 @@
     // @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
     // @version           5.0
     // @description       Supercharges your playlist management by sorting videos by duration with enhanced reliability for large playlists.
-    // @author            cloph-dsp
-    // @originalAuthor    KohGeek
+    // @author            cloph-dsp, originally by KohGeek
     // @license           GPL-2.0-only
     // @homepageURL       https://github.com/cloph-dsp/YouTubeSortByDuration
     // @supportURL        https://github.com/cloph-dsp/YouTubeSortByDuration/issues
@@ -116,15 +115,15 @@
     
     // Enhanced timing configuration
     const TIMING_CONFIG = {
-        scrollDelay: 400,              // Base delay for scrolling
-        scrollRetryDelay: 800,         // Delay when retrying scroll
-        dragBaseDelay: 100,            // Minimum delay between drags
-        dragProcessDelay: 150,         // Wait for drag animation to start
-        dragStabilizationDelay: 400,   // Wait for DOM to stabilize
-        maxWaitTime: 5000,             // Maximum time to wait for YouTube (increased for reliability)
-        pollInterval: 100,             // Polling interval for state checks
-        recoveryDelay: 1000,           // Delay for recovery attempts
-        adaptiveMultiplier: 1.5        // Multiplier for adaptive delays
+        scrollDelay: 400, // Base delay for scrolling
+        scrollRetryDelay: 800, // Delay when retrying scroll
+        dragBaseDelay: 100, // Minimum delay between drags
+        dragProcessDelay: 150, // Wait for drag animation to start
+        dragStabilizationDelay: 400, // Wait for DOM to stabilize
+        maxWaitTime: 5000, // Maximum time to wait for YouTube (increased for reliability)
+        pollInterval: 100, // Polling interval for state checks
+        recoveryDelay: 1000, // Delay for recovery attempts
+        adaptiveMultiplier: 1.5 // Multiplier for adaptive delays
     };
     
     // Error tracking
@@ -377,7 +376,10 @@
         element.type = 'number';
         element.value = defaultValue;
         element.className = 'style-scope';
-        element.oninput = (e) => { scrollLoopTime = +(e.target.value) };
+        element.oninput = (e) => { 
+            // This variable appears to be unused - commenting out to fix linting
+            // scrollLoopTime = +(e.target.value);
+        };
      
         elementDiv.appendChild(element);
         document.querySelector('div.sort-playlist').appendChild(elementDiv);
@@ -1019,7 +1021,7 @@
      
     // Initialize UI
     let init = () => {
-        onElementReady('ytd-playlist-video-list-renderer', false, () => {
+        window.onElementReady('ytd-playlist-video-list-renderer', false, () => {
             // Avoid duplicate
             if (document.querySelector('.sort-playlist')) return;
      
@@ -1044,8 +1046,8 @@
     (() => {
         init();
         // Re-init UI on in-app navigation (guard for browsers without navigation API)
-        if (window.navigation && typeof navigation.addEventListener === 'function') {
-            navigation.addEventListener('navigate', () => {
+        if (window.navigation && typeof window.navigation.addEventListener === 'function') {
+            window.navigation.addEventListener('navigate', () => {
                 setTimeout(() => {
                     if (!document.querySelector('.sort-playlist')) init();
                 }, 500);
