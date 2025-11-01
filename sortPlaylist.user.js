@@ -1,21 +1,21 @@
+// ==UserScript==
+// @name              YouTubeSortByDuration
+// @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
+// @version           5.0
+// @description       Supercharges your playlist management by sorting videos by duration with enhanced reliability for large playlists.
+// @author            cloph-dsp, originally by KohGeek
+// @license           GPL-2.0-only
+// @homepageURL       https://github.com/cloph-dsp/YouTubeSortByDuration
+// @supportURL        https://github.com/cloph-dsp/YouTubeSortByDuration/issues
+// @match             http://*.youtube.com/*
+// @match             https://*.youtube.com/*
+// @require           https://greasyfork.org/scripts/374849-library-onelementready-es7/code/Library%20%7C%20onElementReady%20ES7.js
+// @grant             none
+// @run-at            document-start
+// ==/UserScript==
 
+/* global onElementReady */
 
-    // ==UserScript==
-    // @name              YouTubeSortByDuration
-    // @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
-    // @version           5.0
-    // @description       Supercharges your playlist management by sorting videos by duration with enhanced reliability for large playlists.
-    // @author            cloph-dsp, originally by KohGeek
-    // @license           GPL-2.0-only
-    // @homepageURL       https://github.com/cloph-dsp/YouTubeSortByDuration
-    // @supportURL        https://github.com/cloph-dsp/YouTubeSortByDuration/issues
-    // @match             http://*.youtube.com/*
-    // @match             https://*.youtube.com/*
-    // @require           https://greasyfork.org/scripts/374849-library-onelementready-es7/code/Library%20%7C%20onElementReady%20ES7.js
-    // @grant             none
-    // @run-at            document-start
-    // ==/UserScript==
-     
     // CSS styles
     const css = `
         /* Container wrapper */
@@ -23,78 +23,167 @@
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 16px;
-            padding: 12px;
-            background-color: var(--yt-spec-base-background);
+            gap: 12px;
+            padding: 14px 16px;
+            background: linear-gradient(to bottom, var(--yt-spec-base-background) 0%, var(--yt-spec-raised-background) 100%);
             border-bottom: 1px solid var(--yt-spec-10-percent-layer);
             width: 100%;
             box-sizing: border-box;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
+        
         /* Controls grouping */
         .sort-playlist-controls {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
+            flex-wrap: wrap;
         }
+        
         /* Sort button wrapper */
         #sort-toggle-button {
-            padding: 8px 16px;
+            padding: 10px 20px;
             font-size: 14px;
+            font-weight: 500;
             white-space: nowrap;
             cursor: pointer;
             background: none;
             outline: none;
+            border-radius: 18px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            font-family: "YouTube Sans", "Roboto", sans-serif;
+            letter-spacing: 0.25px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
         }
+        
+        #sort-toggle-button:active {
+            transform: scale(0.96);
+        }
+        
         /* Start (green) state */
         .sort-button-start {
-            background-color: #28a745;
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
             color: #fff;
-            border: 1px solid #28a745;
-            border-radius: 4px;
-            transition: background-color 0.3s, transform 0.2s;
+            border: none;
         }
+        
         .sort-button-start:hover {
-            background-color: #218838;
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            box-shadow: 0 2px 8px rgba(46, 204, 113, 0.4);
             transform: translateY(-1px);
         }
+        
         /* Stop (red) state */
         .sort-button-stop {
-            background-color: #dc3545;
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
             color: #fff;
-            border: 1px solid #dc3545;
-            border-radius: 4px;
-            transition: background-color 0.3s, transform 0.2s;
+            border: none;
         }
+        
         .sort-button-stop:hover {
-            background-color: #c82333;
+            background: linear-gradient(135deg, #c0392b 0%, #a93226 100%);
+            box-shadow: 0 2px 8px rgba(231, 76, 60, 0.4);
             transform: translateY(-1px);
         }
+        
         /* Dropdown selector styling */
         .sort-select {
-            padding: 6px 12px;
+            padding: 8px 14px;
+            padding-right: 32px;
             font-size: 14px;
-            border: 1px solid var(--yt-spec-10-percent-layer);
-            border-radius: 4px;
+            font-weight: 500;
+            border: 1.5px solid var(--yt-spec-10-percent-layer);
+            border-radius: 8px;
             background-color: var(--yt-spec-base-background);
-            color: var(--yt-spec-text-primary); /* ensure text is visible */
-            transition: border-color 0.2s;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23909090' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 12px;
+            color: var(--yt-spec-text-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            font-family: "YouTube Sans", "Roboto", sans-serif;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
         }
-        .sort-select option { color: var(--yt-spec-text-primary); }
+        
+        .sort-select:hover {
+            border-color: var(--yt-spec-text-secondary);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+        }
+        
+        .sort-select option {
+            color: var(--yt-spec-text-primary);
+            background-color: var(--yt-spec-base-background);
+            padding: 8px;
+        }
+        
         .sort-select:focus {
-            border-color: var(--yt-spec-brand-link-text);
-            box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.3);
+            border-color: var(--yt-spec-call-to-action);
+            box-shadow: 0 0 0 3px rgba(62, 166, 255, 0.15);
             outline: none;
         }
+        
         /* Status log element */
         .sort-log {
             margin-left: auto;
-            padding: 6px 12px;
+            padding: 8px 16px;
             font-size: 13px;
-            background-color: var(--yt-spec-base-background);
+            font-weight: 400;
+            background-color: var(--yt-spec-badge-chip-background);
             border: 1px solid var(--yt-spec-10-percent-layer);
-            border-radius: 4px;
-            color: var(--yt-spec-text-primary);
+            border-radius: 16px;
+            color: var(--yt-spec-text-secondary);
             white-space: nowrap;
+            font-family: "YouTube Sans", "Roboto", sans-serif;
+            line-height: 1.4;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            max-width: 500px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .sort-playlist {
+                gap: 10px;
+                padding: 12px;
+            }
+            
+            .sort-log {
+                margin-left: 0;
+                width: 100%;
+                max-width: 100%;
+                text-align: center;
+            }
+            
+            #sort-toggle-button {
+                flex: 1;
+                min-width: 120px;
+            }
+        }
+        
+        /* Dark mode enhancement */
+        @media (prefers-color-scheme: dark) {
+            .sort-playlist {
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            }
+            
+            .sort-select {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aaaaaa' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            }
+        }
+        
+        /* Smooth animations */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .sort-log.sorting {
+            animation: pulse 2s ease-in-out infinite;
         }
     `
      
@@ -285,6 +374,12 @@
     let logActivity = (message) => {
         if (log) {
             log.innerText = message;
+            // Add pulse animation during active sorting
+            if (message.includes('🔄') || message.includes('⏳') || message.includes('📊 Progress')) {
+                log.classList.add('sorting');
+            } else if (message.includes('✅') || message.includes('⛔') || message.includes('❌')) {
+                log.classList.remove('sorting');
+            }
         }
         // Always log to console for debugging
         console.log(`[YouTubeSortByDuration] ${message}`);
@@ -564,25 +659,24 @@
         return result;
     };
 
-    // Sort videos using selection sort algorithm (based on original working version)
-    const sortVideos = (allAnchors, allDragPoints, expectedCount) => {
+    // Sort videos using optimized insertion sort algorithm
+    // This algorithm minimizes DOM operations and maintains stable progress tracking
+    const sortVideos = (allAnchors, allDragPoints, expectedCount, currentPass = 0) => {
         let videos = [];
-        let sorted = 0;
+        let positionChecked = 0; // Track which position we're checking (stable progress)
         let dragged = false;
 
         // Check what's available in DOM
         const actualCount = Math.min(allDragPoints.length, allAnchors.length);
         if (actualCount < expectedCount * 0.9 || actualCount < 5) {
             logActivity(`⏳ Waiting for more items (${actualCount}/${expectedCount})...`);
-            return { sorted, dragged };
+            return { sorted: positionChecked, dragged };
         }
         
         // CRITICAL: NEVER work with more than expectedCount items
-        // Even if DOM has more elements (due to reload/scroll), we ONLY process the actual playlist size
-        // This prevents building an array with positions beyond the playlist boundaries
         const workingCount = Math.min(actualCount, expectedCount);
 
-        // Build list with durations - ONLY for the first expectedCount positions
+        // Build list with current DOM positions and durations
         for (let j = 0; j < workingCount; j++) {
             let thumb = allAnchors[j];
             let drag = allDragPoints[j];
@@ -598,56 +692,87 @@
                 if (timeDigits[1]) time += parseInt(timeDigits[1]) * 60;
                 if (timeDigits[2]) time += parseInt(timeDigits[2]) * 3600;
             }
-            videos.push({ anchor: drag, time: time, originalIndex: j });
+            videos.push({ 
+                anchor: drag, 
+                time: time, 
+                currentPosition: j // Track current position in DOM
+            });
         }
 
-        // Sort by duration
-        if (sortMode == "asc") {
-            videos.sort((a, b) => a.time - b.time);
-        } else {
-            videos.sort((a, b) => b.time - a.time);
-        }
+        // Create sorted reference array (what the order SHOULD be)
+        let sortedVideos = [...videos].sort((a, b) => {
+            return sortMode == "asc" ? a.time - b.time : b.time - a.time;
+        });
 
-        // Find first mismatch and perform ONE drag
-        for (let j = 0; j < videos.length; j++) {
-            let originalIndex = videos[j].originalIndex;
-
-            if (originalIndex !== j) {
-                // SAFETY CHECK: Ensure we're not trying to drag from beyond the playlist
-                if (originalIndex >= expectedCount) {
-                    logActivity(`⚠️ Skipping invalid position ${originalIndex + 1} (beyond playlist size ${expectedCount})`);
-                    sorted = j;
-                    continue; // Skip this swap and move to next
+        // Check each position starting from where we left off in this pass
+        for (let targetPos = currentPass; targetPos < videos.length; targetPos++) {
+            positionChecked = targetPos;
+            
+            // Check if video at targetPos is correct
+            const currentVideo = videos[targetPos];
+            const targetVideo = sortedVideos[targetPos];
+            
+            // Compare by duration (since object references change)
+            if (currentVideo.time !== targetVideo.time) {
+                // Find where the correct video currently is
+                // Must search ALL positions, not just after targetPos
+                let sourcePos = -1;
+                for (let i = 0; i < videos.length; i++) {
+                    if (i !== targetPos && videos[i].time === targetVideo.time) {
+                        sourcePos = i;
+                        break;
+                    }
                 }
                 
-                // Use the STORED anchor references from when we built the videos array
-                // These references remain valid even if DOM shifts
-                let elemDrag = videos[j].anchor; // The video that should be at position j
-                let elemDrop = videos.find((v) => v.originalIndex === j).anchor; // The video currently at position j
-
-                // Additional safety: verify elements exist and are valid
+                if (sourcePos === -1) {
+                    // Could be a duplicate duration - find first occurrence that's not at targetPos
+                    for (let i = 0; i < videos.length; i++) {
+                        if (videos[i].time === targetVideo.time && i !== targetPos) {
+                            // Check if this video has the same anchor reference
+                            if (videos[i].anchor !== currentVideo.anchor) {
+                                sourcePos = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (sourcePos === -1) {
+                    // Still can't find it - might be at the target already after previous drag
+                    console.log(`Warning: Could not find video with time ${targetVideo.time} for position ${targetPos}`);
+                    continue;
+                }
+                
+                // SAFETY CHECK: Ensure positions are within bounds
+                if (sourcePos >= expectedCount || targetPos >= expectedCount) {
+                    logActivity(`⚠️ Position out of bounds: source=${sourcePos + 1}, target=${targetPos + 1}`);
+                    continue;
+                }
+                
+                // Verify elements exist
+                const elemDrag = videos[sourcePos].anchor;
+                const elemDrop = videos[targetPos].anchor;
+                
                 if (!elemDrag || !elemDrop) {
-                    logActivity(`⚠️ Missing drag elements at position ${j + 1}, skipping...`);
-                    sorted = j;
+                    logActivity(`⚠️ Missing drag elements at position ${targetPos + 1}, skipping...`);
                     continue;
                 }
 
-                logActivity(`🔄 Moving video from position ${originalIndex + 1} to ${j + 1}`);
+                // Perform ONE drag operation: move video from sourcePos directly to targetPos
+                logActivity(`🔄 Moving video from position ${sourcePos + 1} → ${targetPos + 1}`);
                 simulateDrag(elemDrag, elemDrop);
+                
                 dragged = true;
-                sorted = j; // Return position where swap occurred
-                break;
+                break; // Only do ONE drag per iteration, then re-read DOM
             }
-
-            sorted = j;
 
             if (stopSort) {
                 break;
             }
         }
 
-        // Return sorted position and whether we made a swap
-        return { sorted, dragged };
+        // Return the position checked (stable progress) and whether we made a swap
+        return { sorted: positionChecked, dragged };
     };
     
     // Helper function to format duration for display
@@ -850,6 +975,7 @@
         let consecutiveNoSwaps = 0; // Track complete passes with no swaps
         let lastDragPosition = -1; // Track the last position we tried to drag
         let sameDragAttempts = 0; // Count consecutive attempts at same position
+        let currentPassPosition = 0; // Track where we are in the current sorting pass
         
         logActivity(`🚀 Starting sort...`);
         
@@ -925,10 +1051,19 @@
             const allDragPoints = Array.from(allDragPointsRaw).slice(0, initialVideoCount);
             const allAnchors = Array.from(allAnchorsRaw).slice(0, initialVideoCount);
             
-            const result = sortVideos(allAnchors, allDragPoints, initialVideoCount);
+            const result = sortVideos(allAnchors, allDragPoints, initialVideoCount, currentPassPosition);
             const previousSortedCount = sortedCount;
             sortedCount = result.sorted + 1;
             const didSwap = result.dragged;
+            
+            // Update where we are in the current pass
+            if (didSwap) {
+                // We made a change at this position, continue from here next iteration
+                currentPassPosition = result.sorted;
+            } else {
+                // No swap needed, advance to next position
+                currentPassPosition = result.sorted + 1;
+            }
             
             // Detect if we're trying the same drag repeatedly (means it's failing)
             if (didSwap) {
@@ -949,7 +1084,8 @@
                         // This ensures we re-read the DOM with fresh positions
                         sameDragAttempts = 0;
                         lastDragPosition = -1;
-                        sortedCount = 0; // Start over from beginning
+                        sortedCount = 0;
+                        currentPassPosition = 0; // Start over from beginning
                         logActivity(`🔄 Restarting sort from position 1...`);
                         continue;
                     }
@@ -964,17 +1100,17 @@
             }
             
             // If we completed a full pass without any swaps, we're done!
-            if (!didSwap && sortedCount >= initialVideoCount) {
+            if (!didSwap && currentPassPosition >= initialVideoCount) {
                 logActivity(`✅ Completed full pass with no swaps - sorting complete!`);
                 sortedCount = initialVideoCount; // Mark as 100% complete
                 break;
             }
             
-            // If we reached the end but did make a swap, start over from beginning
-            if (didSwap && sortedCount >= initialVideoCount) {
-                logActivity(`🔄 Completed pass ${Math.floor(iterationCount / initialVideoCount) + 1}, restarting from position 1...`);
-                sortedCount = 0; // Reset to check from start again
-                consecutiveNoSwaps = 0;
+            // If we reached the end of a pass, start a new pass from the beginning
+            if (currentPassPosition >= initialVideoCount) {
+                logActivity(`🔄 Completed pass ${Math.floor(iterationCount / initialVideoCount) + 1}, starting new pass...`);
+                currentPassPosition = 0; // Reset to check from start again
+                consecutiveNoSwaps = didSwap ? 0 : consecutiveNoSwaps + 1;
             }
             
             // Detect if we're stuck at same position
@@ -1021,7 +1157,7 @@
      
     // Initialize UI
     let init = () => {
-        window.onElementReady('ytd-playlist-video-list-renderer', false, () => {
+        onElementReady('ytd-playlist-video-list-renderer', false, () => {
             // Avoid duplicate
             if (document.querySelector('.sort-playlist')) return;
      
