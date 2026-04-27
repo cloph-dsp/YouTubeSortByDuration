@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              YouTubeSortByDuration
 // @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
-// @version           6.0
+// @version           6.1
 // @description       Supercharges your playlist management by sorting videos by duration with enhanced reliability for large playlists.
 // @author            cloph-dsp, originally by KohGeek
 // @license           GPL-2.0-only
@@ -282,7 +282,14 @@
                         if (!videoList) continue;
                         for (const entry of videoList) {
                             const r = entry?.playlistVideoRenderer;
-                            if (r?.videoId && r?.setVideoId) map.set(r.videoId, r.setVideoId);
+                            // KEY: Use the SAME key format as generateStableKey for consistency
+                            // generateStableKey returns: `vid-{videoId}` or `idx-{index}`
+                            const videoId = r?.videoId;
+                            const setVideoId = r?.setVideoId;
+                            if (videoId && setVideoId) {
+                                // Use same key format as generateStableKey
+                                map.set('vid-' + videoId, setVideoId);
+                            }
                         }
                     }
                 }
@@ -319,13 +326,8 @@
         const desired = entries.map(e => e.videoId).filter(Boolean);
         if (!desired.length) { logActivity('❌ No sortable items.'); return false; }
 
-        const container = document.querySelector('ytd-playlist-video-list-renderer');
-        if (!container) return false;
-        let current = Array.from(container.querySelectorAll('ytd-playlist-video-renderer'))
-            .map(el => el.querySelector('a#thumbnail')?.getAttribute('href')?.match(/[?&]v=([a-zA-Z0-9_-]{11})/)?.[1])
-            .filter(Boolean);
-
-        if (!current.length) { logActivity('❌ No videos in DOM.'); return false; }
+        const current = entries.map(e => e.videoId);
+        if (!current.length) { logActivity('❌ No videos in snapshot.'); return false; }
 
         let alreadySorted = true;
         for (let i = 0; i < Math.min(current.length, desired.length); i++) {
@@ -336,7 +338,6 @@
         let errors = 0;
         const maxErrors = 8;
 
-        // Selection sort using virtual array (tracked in memory, not DOM)
         for (let pos = 0; pos < desired.length && !stopSort && errors < maxErrors; pos++) {
             if (current[pos] === desired[pos]) continue;
 
@@ -347,18 +348,16 @@
                 errors++; continue;
             }
 
-            const targetSetVideoId = setVideoIdMap.get(targetVideoId);
+            const targetSetVideoId = setVideoIdMap.get('vid-' + targetVideoId);
             if (!targetSetVideoId) {
                 logActivity(`⚠️ No setVideoId for position ${pos + 1}. Skipping.`);
                 errors++; continue;
             }
 
-            // ACTION_MOVE_VIDEO_AFTER with no predecessor = move to top.
-            // With predecessor = move after that video's setVideoId.
             let predecessorId = null;
             if (pos > 0) {
                 const predId = desired[pos - 1];
-                predecessorId = setVideoIdMap.get(predId);
+                predecessorId = setVideoIdMap.get('vid-' + predId);
             }
 
             const title = entries.find(e => e.videoId === targetVideoId)?.title || `Video ${pos + 1}`;
@@ -882,23 +881,37 @@
 
         logActivity(`✅ Found ${setVideoIdMap.size} video entries. Setting manual sort mode...`);
 
-        // Ensure playlist is in manual sort mode - API reorder only works in manual mode
-        const sortButton = document.querySelector('yt-dropdown-menu[icon-label="Ordenar"] tp-yt-paper-button, yt-dropdown-menu[icon-label="Sort"] tp-yt-paper-button');
+        const sortDropdowns = [
+            'yt-dropdown-menu[icon-label="Ordenar"]',
+            'yt-dropdown-menu[icon-label="Sort"]',
+            'yt-dropdown-menu tp-yt-paper-button',
+            'tp-yt-iron-dropdown + tp-yt-paper-button'
+        ];
+        const sortButton = document.querySelector(sortDropdowns.join(', '));
         if (sortButton) {
             try {
-                const isOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
-                if (isOpen) { document.body.click(); await sleep(100); }
+                logActivity(`🔄 Clicking sort dropdown...`);
+                document.body.click();
+                await sleep(100);
                 sortButton.click();
-                await sleep(200);
-                if (!document.querySelector('tp-yt-paper-listbox:not([hidden])')) { sortButton.click(); await sleep(250); }
-                const manualOption = document.querySelector('tp-yt-paper-listbox a:first-child tp-yt-paper-item');
-                if (manualOption) {
-                    const isSelected = manualOption.hasAttribute('selected') || manualOption.classList.contains('iron-selected') || manualOption.getAttribute('aria-selected') === 'true';
-                    if (!isSelected) { manualOption.click(); await sleep(250); }
+                await sleep(300);
+                const dropdown = document.querySelector('tp-yt-paper-listbox, yt-sort-filter-button-group');
+                if (dropdown) {
+                    const options = dropdown.querySelectorAll('tp-yt-paper-item, yt-sort-filter-button-group > button');
+                    for (const opt of options) {
+                        const text = (opt.textContent || '').toLowerCase();
+                        if (text.includes('manual')) {
+                            logActivity(`🔄 Selecting manual sort...`);
+                            opt.click();
+                            await sleep(400);
+                            break;
+                        }
+                    }
+                    document.body.click();
                 }
-                const stillOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
-                if (stillOpen) document.body.click();
             } catch (e) { console.debug('[YouTubeSortByDuration] Sort mode change error', e); }
+        } else {
+            logActivity(`ℹ️ No sort dropdown found (playlist may not support sorting)`);
         }
 
         logActivity(`🔄 Sorting ${snapshot.length} videos via YouTube API...`);
