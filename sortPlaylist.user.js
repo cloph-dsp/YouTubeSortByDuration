@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name              YouTubeSortByDuration
 // @namespace         https://github.com/cloph-dsp/YouTubeSortByDuration
-// @version           5.0
+// @version           6.0
 // @description       Supercharges your playlist management by sorting videos by duration with enhanced reliability for large playlists.
 // @author            cloph-dsp, originally by KohGeek
 // @license           GPL-2.0-only
@@ -16,7 +16,11 @@
 
 /* global onElementReady */
 
-    // CSS styles
+// v6.0 - YouTube InnerTube API sorting replaces broken DOM drag-and-drop.
+// YouTube no longer accepts synthetic DragEvent - drag simulation was broken.
+// Now uses youtubei/v1/browse/edit_playlist with ACTION_MOVE_VIDEO_AFTER.
+
+// CSS styles
     const css = `
         /* Container wrapper */
         .sort-playlist {
@@ -165,15 +169,30 @@
             }
         }
 
-        /* Dark mode enhancement */
-        @media (prefers-color-scheme: dark) {
-            .sort-playlist {
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            }
+        .sort-playlist[data-yt-dark="true"] {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
 
-            .sort-select {
-                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aaaaaa' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
-            }
+        .sort-playlist[data-yt-dark="true"] .sort-select {
+            background-color: #272727;
+            color: #f1f1f1;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aaaaaa' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+        }
+
+        .sort-playlist[data-yt-dark="true"] .sort-select option {
+            background-color: #272727;
+            color: #f1f1f1;
+        }
+
+        .sort-playlist[data-yt-dark="true"] .sort-log {
+            background-color: #272727;
+            border-color: #404040;
+            color: #f1f1f1;
+        }
+
+        .sort-playlist[data-yt-dark="true"] .sort-playlist-controls label,
+        .sort-playlist[data-yt-dark="true"] .sort-playlist-controls span {
+            color: #f1f1f1;
         }
 
         /* Smooth animations */
@@ -203,33 +222,10 @@
     let isPaused = false;
     let lastFullLoadTimestamp = 0;
 
-    // Enhanced timing configuration
     const TIMING_CONFIG = {
-        scrollDelay: 320, // Base delay for scrolling
-        scrollRetryDelay: 720, // Delay when retrying scroll
-        dragBaseDelay: 150, // Minimum delay between drags (increased from 80)
-        dragProcessDelay: 200, // Wait for drag animation to start (increased from 110)
-        dragStabilizationDelay: 500, // Wait for DOM to stabilize (increased from 320)
-        maxWaitTime: 5000, // Maximum time to wait for YouTube before falling back (increased from 4000)
-        pollInterval: 100, // Polling interval for state checks (increased from 80)
-        recoveryDelay: 1200, // Delay for recovery attempts (increased from 900)
-        adaptiveMultiplier: 1.35, // Multiplier for adaptive delays
-        largePlaylistExtraDelay: 400 // Extra delay for large playlists (>150 videos)
-    };
-
-    const adaptiveState = {
-        dragSuccessStreak: 0,
-        throttlePenalty: 0,
-        throttleUntil: 0,
-        lastThrottleMessage: 0
-    };
-
-    const getAdaptiveDelay = (base, { minimum = 80 } = {}) => {
-        if (!base) return minimum;
-        const streak = adaptiveState.dragSuccessStreak;
-        const factor = 1 - Math.min(0.35, streak * 0.05);
-        const penaltyFactor = 1 + Math.min(1.5, adaptiveState.throttlePenalty * 0.5);
-        return Math.max(minimum, Math.round(base * factor * penaltyFactor));
+        scrollDelay: 320,
+        apiDelay: 600,
+        apiRetryDelay: 2000
     };
 
     const UNIQUE_KEY_FIELD = 'ysbdKey';
@@ -256,60 +252,141 @@
         return videoId ? `vid-${videoId}` : `idx-${index}`;
     };
 
-    // Error tracking
-    const errorTracker = {
-        consecutiveErrors: 0,
-        totalErrors: 0,
-        lastError: null,
-        maxConsecutiveErrors: 5
+
+
+    const getPlaylistId = () => new URLSearchParams(window.location.search).get('list');
+
+    const getSapisidHash = async () => {
+        const match = document.cookie.match(/SAPISID=([^;]+)/);
+        if (!match) return null;
+        const timestamp = Math.floor(Date.now() / 1000);
+        const hash = await crypto.subtle.digest('SHA-1',
+            new TextEncoder().encode(timestamp + ' ' + match[1] + ' ' + window.origin));
+        const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+        return timestamp + '_' + hex;
     };
 
-    // Fire mouse event at coordinates
-    let fireMouseEvent = (type, elem, centerX, centerY) => {
-        const event = new MouseEvent(type, {
-            view: window,
-            bubbles: true,
-            cancelable: true,
-            clientX: centerX,
-            clientY: centerY
+    const extractSetVideoIds = () => {
+        const map = new Map();
+        try {
+            const contents = ytInitialData?.contents?.twoColumnBrowseResultsRenderer?.tabs;
+            if (!contents) return map;
+            for (const tab of contents) {
+                const sectionList = tab?.tabRenderer?.content?.sectionListRenderer?.contents;
+                if (!sectionList) continue;
+                for (const section of sectionList) {
+                    const itemSection = section?.itemSectionRenderer?.contents;
+                    if (!itemSection) continue;
+                    for (const item of itemSection) {
+                        const videoList = item?.playlistVideoListRenderer?.contents;
+                        if (!videoList) continue;
+                        for (const entry of videoList) {
+                            const r = entry?.playlistVideoRenderer;
+                            if (r?.videoId && r?.setVideoId) map.set(r.videoId, r.setVideoId);
+                        }
+                    }
+                }
+            }
+        } catch (e) { console.debug('[YouTubeSortByDuration] ytInitialData parse error', e); }
+        return map;
+    };
+
+    const moveVideoApi = async (setVideoId, predecessorId, playlistId) => {
+        const hash = await getSapisidHash();
+        if (!hash) throw new Error('SAPISID cookie not found');
+        const actions = [{ action: 'ACTION_MOVE_VIDEO_AFTER', setVideoId }];
+        if (predecessorId) actions[0].movedSetVideoIdPredecessor = predecessorId;
+        const res = await fetch('https://www.youtube.com/youtubei/v1/browse/edit_playlist?key=' + ytcfg.data_.INNERTUBE_API_KEY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'SAPISIDHASH ' + hash },
+            body: JSON.stringify({
+                context: { client: { clientName: 'WEB', clientVersion: ytcfg.data_.INNERTUBE_CLIENT_VERSION } },
+                actions, playlistId
+            })
         });
-
-        elem.dispatchEvent(event);
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
     };
 
-    // Simulate drag between elements
-    let simulateDrag = (elemDrag, elemDrop) => {
-        // Get positions
-        let pos = elemDrag.getBoundingClientRect();
-        let center1X = Math.floor((pos.left + pos.right) / 2);
-        let center1Y = Math.floor((pos.top + pos.bottom) / 2);
-        pos = elemDrop.getBoundingClientRect();
-        let center2X = Math.floor((pos.left + pos.right) / 2);
-        let center2Y = Math.floor((pos.top + pos.bottom) / 2);
+    const sortByApi = async (snapshot, setVideoIdMap, playlistId) => {
+        const entries = snapshot.map(v => ({
+            key: v.key, videoId: v.key.replace('vid-', ''),
+            duration: Number.isFinite(v.duration) ? v.duration : (sortMode === 'asc' ? Infinity : -Infinity),
+            title: v.title
+        }));
+        entries.sort((a, b) => sortMode === 'asc' ? a.duration - b.duration : b.duration - a.duration);
 
-        // Mouse events for dragged element
-        fireMouseEvent("mousemove", elemDrag, center1X, center1Y);
-        fireMouseEvent("mouseenter", elemDrag, center1X, center1Y);
-        fireMouseEvent("mouseover", elemDrag, center1X, center1Y);
-        fireMouseEvent("mousedown", elemDrag, center1X, center1Y);
+        const desired = entries.map(e => e.videoId).filter(Boolean);
+        if (!desired.length) { logActivity('❌ No sortable items.'); return false; }
 
-        // Start drag
-        fireMouseEvent("dragstart", elemDrag, center1X, center1Y);
-        fireMouseEvent("drag", elemDrag, center1X, center1Y);
-        fireMouseEvent("mousemove", elemDrag, center1X, center1Y);
-        fireMouseEvent("drag", elemDrag, center2X, center2Y);
-        fireMouseEvent("mousemove", elemDrop, center2X, center2Y);
+        const container = document.querySelector('ytd-playlist-video-list-renderer');
+        if (!container) return false;
+        let current = Array.from(container.querySelectorAll('ytd-playlist-video-renderer'))
+            .map(el => el.querySelector('a#thumbnail')?.getAttribute('href')?.match(/[?&]v=([a-zA-Z0-9_-]{11})/)?.[1])
+            .filter(Boolean);
 
-        // Events over drop target
-        fireMouseEvent("mouseenter", elemDrop, center2X, center2Y);
-        fireMouseEvent("dragenter", elemDrop, center2X, center2Y);
-        fireMouseEvent("mouseover", elemDrop, center2X, center2Y);
-        fireMouseEvent("dragover", elemDrop, center2X, center2Y);
+        if (!current.length) { logActivity('❌ No videos in DOM.'); return false; }
 
-        // Complete drop
-        fireMouseEvent("drop", elemDrop, center2X, center2Y);
-        fireMouseEvent("dragend", elemDrag, center2X, center2Y);
-        fireMouseEvent("mouseup", elemDrag, center2X, center2Y);
+        let alreadySorted = true;
+        for (let i = 0; i < Math.min(current.length, desired.length); i++) {
+            if (current[i] !== desired[i]) { alreadySorted = false; break; }
+        }
+        if (alreadySorted) { logActivity(`✅ Playlist already sorted.`); return true; }
+
+        let errors = 0;
+        const maxErrors = 8;
+
+        // Selection sort using virtual array (tracked in memory, not DOM)
+        for (let pos = 0; pos < desired.length && !stopSort && errors < maxErrors; pos++) {
+            if (current[pos] === desired[pos]) continue;
+
+            const targetVideoId = desired[pos];
+            const sourcePos = current.indexOf(targetVideoId);
+            if (sourcePos === -1) {
+                logActivity(`⚠️ Video ${targetVideoId.slice(0,8)}... not found. Skipping.`);
+                errors++; continue;
+            }
+
+            const targetSetVideoId = setVideoIdMap.get(targetVideoId);
+            if (!targetSetVideoId) {
+                logActivity(`⚠️ No setVideoId for position ${pos + 1}. Skipping.`);
+                errors++; continue;
+            }
+
+            // ACTION_MOVE_VIDEO_AFTER with no predecessor = move to top.
+            // With predecessor = move after that video's setVideoId.
+            let predecessorId = null;
+            if (pos > 0) {
+                const predId = desired[pos - 1];
+                predecessorId = setVideoIdMap.get(predId);
+            }
+
+            const title = entries.find(e => e.videoId === targetVideoId)?.title || `Video ${pos + 1}`;
+            logActivity(`🔄 (${pos + 1}/${desired.length}) Moving "${title}" → position ${pos + 1}`);
+
+            try {
+                await moveVideoApi(targetSetVideoId, predecessorId, playlistId);
+                current.splice(sourcePos, 1);
+                current.splice(pos, 0, targetVideoId);
+                errors = 0;
+                logActivity(`📊 Progress: ${pos + 1}/${desired.length}`);
+            } catch (e) {
+                console.debug('[YouTubeSortByDuration] API error', e);
+                logActivity(`⚠️ API error: ${e.message}. Retrying...`);
+                errors++;
+                await sleep(2000);
+            }
+        }
+
+        const success = errors < maxErrors;
+        if (success) {
+            logActivity(`✅ API sort complete. Reloading playlist to reflect changes...`);
+            await sleep(500);
+            window.location.reload();
+        } else {
+            logActivity('❌ Too many errors. Aborting.');
+        }
+        return success;
     };
 
     // Scroll to position or page bottom with enhanced detection
@@ -428,28 +505,6 @@
         console.log(`[YouTubeSortByDuration] ${message}`);
     };
 
-    const handlePlaylistRateLimit = () => {
-        adaptiveState.dragSuccessStreak = 0;
-        adaptiveState.throttlePenalty = Math.min(12, adaptiveState.throttlePenalty + 1);
-        const backoffMs = 3000 + adaptiveState.throttlePenalty * 2000; // Increased from 2000 + penalty * 1500
-        adaptiveState.throttleUntil = Math.max(adaptiveState.throttleUntil, Date.now() + backoffMs);
-        adaptiveState.lastThrottleMessage = 0;
-        logActivity(`⚠️ YouTube rate limit detected. Backing off for ${Math.ceil(backoffMs / 1000)}s...`);
-    };
-
-    const consumeThrottleCooldown = async () => {
-        if (!adaptiveState.throttleUntil) return;
-        const waitMs = adaptiveState.throttleUntil - Date.now();
-        if (waitMs > 0) {
-            if (Date.now() - adaptiveState.lastThrottleMessage > 1000) {
-                logActivity(`⏳ Cooling down for ${Math.ceil(waitMs / 1000)}s to respect YouTube limits...`);
-                adaptiveState.lastThrottleMessage = Date.now();
-            }
-            await sleep(waitMs);
-        }
-        adaptiveState.throttleUntil = 0;
-    };
-
     const installThrottleMonitor = () => {
         if (window.__ysbdThrottleMonitorInstalled) return;
         if (typeof XMLHttpRequest === 'undefined' || !XMLHttpRequest.prototype) return;
@@ -459,10 +514,8 @@
             this.addEventListener('readystatechange', () => {
                 try {
                     if (this.readyState === 4 && this.responseURL && this.responseURL.includes('/browse/edit_playlist')) {
-                        // Detect any error response from edit_playlist endpoint
                         if (this.status === 409 || this.status >= 400) {
                             console.warn(`[YouTubeSortByDuration] YouTube API error ${this.status} on edit_playlist`);
-                            handlePlaylistRateLimit();
                         }
                     }
                 } catch (error) {
@@ -551,25 +604,6 @@
         document.querySelector('.sort-playlist-controls').appendChild(element);
     };
 
-    // Create number input
-    let renderNumberElement = (defaultValue = 0, label = '') => {
-        const elementDiv = document.createElement('div');
-        elementDiv.className = 'sort-playlist-div sort-margin-right-3px';
-        elementDiv.innerText = label;
-
-        const element = document.createElement('input');
-        element.type = 'number';
-        element.value = defaultValue;
-        element.className = 'style-scope';
-        element.oninput = (e) => {
-            // This variable appears to be unused - commenting out to fix linting
-            // scrollLoopTime = +(e.target.value);
-        };
-
-        elementDiv.appendChild(element);
-        document.querySelector('div.sort-playlist').appendChild(elementDiv);
-    };
-
     // Create status log display
     let renderLogElement = () => {
         log.className = 'style-scope sort-log';
@@ -584,47 +618,19 @@
         document.head.appendChild(element);
     };
 
-    // Wait for YouTube to process drag with enhanced detection
-    const waitForYoutubeProcessing = async () => {
-        // Initial short wait for drag animation to start
-        await sleep(getAdaptiveDelay(TIMING_CONFIG.dragProcessDelay, { minimum: 70 }));
-
-        // Poll for stability - check if DOM has stabilized
-        const startTime = Date.now();
-        let lastItemCount = 0;
-        let stableChecks = 0;
-        const playlistContainer = document.querySelector("ytd-playlist-video-list-renderer");
-        const requiredStableChecks = adaptiveState.dragSuccessStreak > 3 ? 1 : 2;
-        const pollDelayFast = Math.max(60, Math.round(TIMING_CONFIG.pollInterval * 0.7));
-        const pollDelay = adaptiveState.dragSuccessStreak > 5 ? pollDelayFast : TIMING_CONFIG.pollInterval;
-
-        while (Date.now() - startTime < TIMING_CONFIG.maxWaitTime && !stopSort) {
-            const currentItems = playlistContainer ? playlistContainer.querySelectorAll("yt-icon#reorder").length : 0;
-
-            // Check if count is stable (hasn't changed)
-            if (currentItems === lastItemCount && currentItems > 0) {
-                stableChecks++;
-                // If stable for required checks, we're done
-                if (stableChecks >= requiredStableChecks) {
-                    const waitTime = Date.now() - startTime;
-                    if (waitTime > 1000) {
-                        console.log(`[YouTubeSortByDuration] YouTube took ${waitTime}ms to process`);
-                    }
-                    return true;
-                }
-            } else {
-                // Count changed, reset stability counter
-                stableChecks = 0;
-                lastItemCount = currentItems;
-            }
-
-            await sleep(pollDelay);
-        }
-
-        // Additional stabilization wait
-        await sleep(getAdaptiveDelay(TIMING_CONFIG.dragStabilizationDelay, { minimum: 140 }));
-        return true;
+    // YouTube has its own dark mode toggle (separate from OS prefers-color-scheme).
+    // We detect it by checking the app background color, which is very dark in dark mode.
+    const applyTheme = () => {
+        const container = document.querySelector('.sort-playlist');
+        if (!container) return;
+        const ytdApp = document.querySelector('ytd-app');
+        if (!ytdApp) return;
+        const bg = getComputedStyle(ytdApp).backgroundColor;
+        const r = parseInt(bg.replace(/[^0-9,]/g, '').split(',')[0], 10);
+        container.dataset.ytDark = String(!isNaN(r) && r < 40);
     };
+
+
 
     // Check if playlist is fully loaded
     let isPlaylistFullyLoaded = (reportedCount, loadedCount) => {
@@ -766,549 +772,153 @@
         return snapshot;
     };
 
-    const ensureElementInView = async (element, indexHint = null) => {
-        if (!element) return;
-        const rect = element.getBoundingClientRect();
-        const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
-        if (isVisible) {
-            return;
+    const captureVisibleVideos = (playlistContainer, videoMap) => {
+        const visible = getPlaylistItems(playlistContainer);
+        let newEntries = 0;
+
+        for (const video of visible) {
+            if (!video || !video.key) continue;
+            if (!videoMap.has(video.key) || (!videoMap.get(video.key).hasDuration && video.hasDuration)) {
+                videoMap.set(video.key, {
+                    key: video.key,
+                    duration: video.duration,
+                    durationText: video.durationText,
+                    title: video.title,
+                    hasDuration: video.hasDuration
+                });
+                newEntries++;
+            }
         }
 
-        try {
-            element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
-        } catch (error) {
-            element.scrollIntoView({ block: 'center', inline: 'nearest' });
-        }
-
-        const hint = Number.isFinite(indexHint) ? Math.min(Math.max(indexHint, 1), 400) : 0;
-        const delay = 160 + Math.min(420, hint * 4);
-        await sleep(delay);
-
-        // If still not visible, attempt a small nudging scroll
-        const reassessed = element.getBoundingClientRect();
-        if (reassessed.top < 0 || reassessed.bottom > window.innerHeight) {
-            const scrollElement = document.scrollingElement;
-            const offset = Math.sign(reassessed.top) * window.innerHeight * 0.25;
-            scrollElement.scrollTop += offset;
-            await sleep(180);
-        }
+        return { added: newEntries, visibleCount: visible.length };
     };
 
-    // Optimized sorting algorithm using selection sort with validation
-    // This ensures we make minimal moves and verify each move succeeds
-    const sortVideosOptimized = async (playlistContainer, desiredOrder, expectedCount) => {
-        let moveCount = 0;
-        let verificationFailures = 0;
-        const maxVerificationFailures = 5;
-        let domRefreshAttempts = 0;
-        const maxDomRefreshAttempts = 8; // Increased from 3 to allow more scroll attempts
-
-        // Selection sort: for each position, find the correct video and move it there
-        for (let targetPos = 0; targetPos < expectedCount && !stopSort; targetPos++) {
-            await consumeThrottleCooldown();
-
-            // Get fresh DOM state
-            let currentVideos = getPlaylistItems(playlistContainer);
-
-            // Handle DOM count mismatch - scroll to load more videos
-            if (currentVideos.length < expectedCount) {
-                domRefreshAttempts++;
-
-                if (domRefreshAttempts > maxDomRefreshAttempts) {
-                    // After many attempts, YouTube's DOM limit is preventing us from loading all videos
-                    // This is expected for playlists >100 videos during manual reordering
-                    logActivity(`⚠️ YouTube DOM limit reached at ${currentVideos.length} videos. Continuing with multi-pass approach...`);
-
-                    // Instead of stopping, continue with what we have
-                    // Filter to only videos currently available
-                    const availableKeys = new Set(currentVideos.map(v => v.key));
-                    const filteredOrder = desiredOrder.filter(key => availableKeys.has(key));
-
-                    // Update expected count to match available videos
-                    const originalExpected = expectedCount;
-                    expectedCount = filteredOrder.length;
-                    desiredOrder = filteredOrder;
-
-                    domRefreshAttempts = 0;
-
-                    logActivity(`🔄 Adjusted to sort ${expectedCount} available videos (${originalExpected - expectedCount} videos out of DOM)`);
-                }
-
-                // Only try to load more if we haven't hit the limit
-                if (domRefreshAttempts <= maxDomRefreshAttempts) {
-                    logActivity(`⚠️ Only ${currentVideos.length}/${expectedCount} videos loaded. Attempting gentle scroll (${domRefreshAttempts}/${maxDomRefreshAttempts})...`);
-
-                    // Gentle scroll: small incremental scroll to load more without unloading current area
-                    const scrollElement = document.scrollingElement;
-                    if (scrollElement) {
-                        const currentScroll = scrollElement.scrollTop;
-                        // Small scroll down
-                        scrollElement.scrollTop = currentScroll + window.innerHeight;
-                        await sleep(600);
-                        // Scroll back
-                        scrollElement.scrollTop = currentScroll;
-                        await sleep(400);
-                    }
-
-                    // Check if we made progress
-                    currentVideos = getPlaylistItems(playlistContainer);
-
-                    // If STILL not enough and we're far from limit, try one more time
-                    if (currentVideos.length < expectedCount && domRefreshAttempts < 3) {
-                        targetPos--; // Retry this position
-                        continue;
-                    }
-
-                    // If we got some videos loaded, continue with what we have
-                    if (currentVideos.length > 50) {
-                        domRefreshAttempts = 0; // Reset for next time
-                    }
-                }
-            } else if (currentVideos.length > expectedCount) {
-                // Too many items - trim to expected count
-                currentVideos = currentVideos.slice(0, expectedCount);
-                domRefreshAttempts = 0;
-            } else {
-                // Count is correct, reset retry counter
-                domRefreshAttempts = 0;
-            }
-
-            const expectedKey = desiredOrder[targetPos];
-            const currentKey = currentVideos[targetPos]?.key;
-
-            // Already in correct position?
-            if (currentKey === expectedKey) {
-                continue;
-            }
-
-            // Find where the correct video currently is
-            const sourcePos = currentVideos.findIndex(v => v.key === expectedKey);
-
-            if (sourcePos === -1) {
-                // Video not found - it may have been unloaded from DOM
-                // Try scrolling to load it
-                logActivity(`⚠️ Video for position ${targetPos + 1} not in DOM. Scrolling to load it...`);
-                await scrollToVideoPosition(playlistContainer, targetPos);
-                await sleep(800);
-
-                // Retry getting current videos
-                currentVideos = getPlaylistItems(playlistContainer);
-                const retrySourcePos = currentVideos.findIndex(v => v.key === expectedKey);
-
-                if (retrySourcePos === -1) {
-                    // Still not found after scrolling
-                    const availableKeys = currentVideos.map(v => v.key);
-                    if (!availableKeys.includes(expectedKey)) {
-                        logActivity(`⚠️ Video at position ${targetPos + 1} still not in DOM after scrolling. Skipping...`);
-                        continue;
-                    } else {
-                        logActivity(`❌ Cannot find video for position ${targetPos + 1}. Retrying...`);
-                        verificationFailures++;
-                        if (verificationFailures >= maxVerificationFailures) {
-                            logActivity(`❌ Too many missing videos. Stopping sort.`);
-                            return { success: false, moveCount, position: targetPos };
-                        }
-                        await sleep(500);
-                        targetPos--; // Retry this position
-                        continue;
-                    }
-                }
-            }
-
-            if (sourcePos === targetPos) {
-                continue; // Shouldn't happen but be safe
-            }
-
-            const dragVideo = currentVideos[sourcePos];
-            const dropVideo = currentVideos[targetPos];
-
-            if (!dragVideo?.dragHandle || !dropVideo?.dragHandle) {
-                logActivity(`⚠️ Missing drag handles at position ${targetPos + 1}`);
-                await sleep(300);
-                continue;
-            }
-
-            // Ensure both elements are visible
-            await ensureElementInView(dragVideo.item, sourcePos);
-            await ensureElementInView(dropVideo.item, targetPos);
-            await sleep(getAdaptiveDelay(TIMING_CONFIG.dragBaseDelay, { minimum: 80 }));
-
-            // Perform the drag
-            const videoTitle = dragVideo.title || `Video ${sourcePos + 1}`;
-            logActivity(`🔄 Moving "${videoTitle}" from ${sourcePos + 1} → ${targetPos + 1}`);
-
-            simulateDrag(dragVideo.dragHandle, dropVideo.dragHandle);
-            moveCount++;
-
-            // Wait for YouTube to process
-            await waitForYoutubeProcessing();
-
-            // For large playlists (>150 videos), add extra stabilization time
-            if (expectedCount > 150) {
-                await sleep(TIMING_CONFIG.largePlaylistExtraDelay);
-            }
-
-            // Additional delay between moves to prevent rate limiting
-            // Minimum 300ms between drag operations for playlists >100 videos
-            if (expectedCount > 100) {
-                await sleep(Math.max(300, getAdaptiveDelay(200, { minimum: 300 })));
-            }
-
-            // CRITICAL: Verify the move succeeded
-            let verifyVideos = getPlaylistItems(playlistContainer);
-
-            // Handle DOM count mismatch after move
-            if (verifyVideos.length > expectedCount) {
-                verifyVideos = verifyVideos.slice(0, expectedCount);
-            } else if (verifyVideos.length < expectedCount) {
-                // Wait a bit for DOM to stabilize
-                await sleep(500);
-                verifyVideos = getPlaylistItems(playlistContainer);
-                if (verifyVideos.length > expectedCount) {
-                    verifyVideos = verifyVideos.slice(0, expectedCount);
-                }
-            }
-
-            const verifyKey = verifyVideos[targetPos]?.key;
-
-            if (verifyKey !== expectedKey) {
-                // Find where the video actually ended up
-                const actualPos = verifyVideos.findIndex(v => v.key === expectedKey);
-                if (actualPos !== -1) {
-                    logActivity(`⚠️ Verification failed at position ${targetPos + 1}. Video found at position ${actualPos + 1}. Retrying...`);
-
-                    // Special case: if video ended up at position 1, the drag didn't work at all
-                    // This suggests we need better viewport visibility
-                    if (actualPos === 0 && verificationFailures < 3) {
-                        logActivity(`🔍 Video bounced to position 1. Ensuring better visibility...`);
-                        // Scroll to ensure target is more centrally positioned
-                        const targetElement = currentVideos[targetPos]?.item;
-                        if (targetElement) {
-                            targetElement.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-                            await sleep(800);
-                        }
-                    }
-                } else {
-                    logActivity(`⚠️ Verification failed at position ${targetPos + 1}. Video not found in DOM. Retrying...`);
-                }
-
-                verificationFailures++;
-
-                if (verificationFailures >= maxVerificationFailures) {
-                    logActivity(`❌ Too many verification failures (${verificationFailures}). Stopping sort.`);
-                    return { success: false, moveCount, position: targetPos };
-                }
-
-                // Wait longer for DOM to stabilize, increase wait time with each failure
-                const waitTime = 1500 + (verificationFailures * 700);
-                await sleep(waitTime);
-
-                // Force a DOM refresh if we've failed multiple times
-                if (verificationFailures >= 3) {
-                    logActivity(`🔄 Forcing DOM refresh after ${verificationFailures} failures...`);
-                    await scrollToRefreshDOM(playlistContainer, expectedCount);
-                    await sleep(1000);
-                }
-
-                targetPos--; // Retry this position
-                continue;
-            }
-
-            // Success - reset failure counter
-            verificationFailures = 0;
-            adaptiveState.dragSuccessStreak = Math.min(20, adaptiveState.dragSuccessStreak + 1);
-
-            // Update progress
-            const progress = Math.round(((targetPos + 1) / expectedCount) * 100);
-            logActivity(`� Progress: ${targetPos + 1}/${expectedCount} (${progress}%) | ${moveCount} moves`);
-
-            // Periodic check to ensure next videos are loaded
-            // Check every 20 positions to ensure we have a buffer of videos ahead
-            if (targetPos > 0 && targetPos % 20 === 0) {
-                // Check if we have enough videos loaded ahead
-                const lookAhead = Math.min(20, expectedCount - targetPos);
-                const neededCount = targetPos + lookAhead;
-
-                if (currentVideos.length < neededCount) {
-                    logActivity(`🔄 Loading next videos (have ${currentVideos.length}, need ${neededCount})...`);
-                    // Gently scroll forward to load next batch without unloading current position
-                    const scrollElement = document.scrollingElement;
-                    const currentScroll = scrollElement.scrollTop;
-                    scrollElement.scrollTop = currentScroll + (window.innerHeight * 0.5);
-                    await sleep(800);
-                    // Scroll back to working area
-                    scrollElement.scrollTop = currentScroll;
-                    await sleep(400);
-                }
-            }
-        }
-
-        return { success: true, moveCount, position: expectedCount, actualCount: expectedCount };
-    };
-
-    // Helper to scroll to a specific video position to ensure it's loaded
-    const scrollToVideoPosition = async (playlistContainer, videoIndex) => {
-        const allItems = playlistContainer.querySelectorAll('ytd-playlist-video-renderer');
-
-        if (videoIndex < allItems.length) {
-            // Video is already in DOM, scroll to it
-            const targetVideo = allItems[videoIndex];
-            try {
-                targetVideo.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
-            } catch (error) {
-                targetVideo.scrollIntoView({ block: 'center', inline: 'nearest' });
-            }
-            await sleep(600);
-        } else {
-            // Video not in DOM yet, scroll down to load it
-            const scrollElement = document.scrollingElement;
-            if (!scrollElement) return;
-
-            // Estimate scroll position based on video index
-            // Approximate: each video is ~100px tall
-            const estimatedPosition = videoIndex * 100;
-            scrollElement.scrollTop = estimatedPosition;
-            await sleep(800);
-
-            // If video still not loaded, scroll to bottom
-            const recheck = playlistContainer.querySelectorAll('ytd-playlist-video-renderer');
-            if (videoIndex >= recheck.length) {
-                scrollElement.scrollTop = scrollElement.scrollHeight;
-                await sleep(800);
-            }
-        }
-    };
-
-    // Helper to refresh DOM by scrolling - tries to load more items if missing
-    const scrollToRefreshDOM = async (playlistContainer, expectedCount) => {
+    const collectFullPlaylistSnapshot = async (playlistContainer, reportedCount) => {
         const scrollElement = document.scrollingElement;
-        if (!scrollElement) return;
+        if (!playlistContainer || !scrollElement) return [];
 
-        // Check current state first
-        let items = playlistContainer.querySelectorAll("yt-icon#reorder");
-        const currentCount = items.length;
+        const videoMap = new Map();
+        const maxStagnantScrolls = 30;
+        let stagnantScrolls = 0;
 
-        // If we already have enough items, don't scroll
-        if (currentCount >= expectedCount) {
-            return;
+        scrollElement.scrollTop = 0;
+        await sleep(500);
+        captureVisibleVideos(playlistContainer, videoMap);
+
+        while (videoMap.size < reportedCount && stagnantScrolls < maxStagnantScrolls && !stopSort) {
+            const previousSize = videoMap.size;
+            const previousScroll = scrollElement.scrollTop;
+
+            scrollElement.scrollTop = Math.min(scrollElement.scrollHeight, scrollElement.scrollTop + window.innerHeight * 0.9);
+            await sleep(350);
+            captureVisibleVideos(playlistContainer, videoMap);
+
+            if (videoMap.size === previousSize && scrollElement.scrollTop === previousScroll) {
+                stagnantScrolls++;
+            } else {
+                stagnantScrolls = 0;
+            }
+
+            if (scrollElement.scrollTop >= scrollElement.scrollHeight - window.innerHeight - 5) {
+                // Bounce slightly upward to encourage fresh loads
+                scrollElement.scrollTop = Math.max(0, scrollElement.scrollTop - window.innerHeight * 0.5);
+                await sleep(250);
+            }
         }
 
-        const savedScroll = scrollElement.scrollTop;
+        // Ensure we captured anything newly loaded while returning to top
+        scrollElement.scrollTop = 0;
+        await sleep(500);
+        captureVisibleVideos(playlistContainer, videoMap);
 
-        // If we're missing a lot of items, scroll to bottom to reload everything
-        if (currentCount < expectedCount * 0.7) {
-            logActivity(`🔄 Reloading playlist (${currentCount}/${expectedCount} items)...`);
-            scrollElement.scrollTop = scrollElement.scrollHeight;
-            await sleep(800);
-            scrollElement.scrollTop = 0;
-            await sleep(600);
-        } else {
-            // Small scroll down to trigger lazy loading
-            scrollElement.scrollTop = Math.min(savedScroll + window.innerHeight * 2, scrollElement.scrollHeight);
-            await sleep(400);
-            scrollElement.scrollTop = savedScroll;
-            await sleep(300);
+        if (videoMap.size >= reportedCount) {
+            logActivity(`✅ Captured metadata for ${videoMap.size}/${reportedCount} videos`);
+        } else if (videoMap.size > 0) {
+            logActivity(`⚠️ Only captured ${videoMap.size}/${reportedCount} videos during scan. Will sort available entries.`);
         }
 
-        // Verify items loaded
-        items = playlistContainer.querySelectorAll("yt-icon#reorder");
-        logActivity(`🔄 DOM refresh: ${items.length}/${expectedCount} items visible`);
+        return Array.from(videoMap.values());
     };
 
-    // Main sorting function - refactored for reliability
     const activateSort = async () => {
-        // Reset state
-        errorTracker.consecutiveErrors = 0;
-        errorTracker.totalErrors = 0;
         stopSort = false;
-        isPaused = false;
-        adaptiveState.dragSuccessStreak = 0;
-        adaptiveState.throttlePenalty = 0;
-        adaptiveState.throttleUntil = 0;
 
-        const sortStartTime = Date.now();
+        const playlistId = getPlaylistId();
+        if (!playlistId) { logActivity('❌ No playlist ID found.'); return; }
 
-        // Set manual sorting mode
-        const ensureManualSort = async () => {
-            const sortButton = document.querySelector('yt-dropdown-menu[icon-label="Ordenar"] tp-yt-paper-button, yt-dropdown-menu[icon-label="Sort"] tp-yt-paper-button');
-            if (!sortButton) {
-                logActivity("⚠️ Sort dropdown not found. Using current mode.");
-                return false;
-            }
-
-            // Check if dropdown is already open and close it first
-            const isDropdownOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
-            if (isDropdownOpen) {
-                document.body.click();
-                await sleep(100);
-            }
-
-            // Open the dropdown menu
-            logActivity("🔧 Setting manual sort mode...");
-            sortButton.click();
-            await sleep(200);
-
-            // Verify dropdown is visible
-            let dropdownMenu = document.querySelector('tp-yt-paper-listbox:not([hidden])');
-            if (!dropdownMenu) {
-                sortButton.click();
-                await sleep(250);
-                dropdownMenu = document.querySelector('tp-yt-paper-listbox:not([hidden])');
-            }
-
-            // Select manual option
-            const manualOption = document.querySelector('tp-yt-paper-listbox a:first-child tp-yt-paper-item');
-            if (manualOption) {
-                const isSelected = manualOption.hasAttribute('selected') ||
-                                  manualOption.classList.contains('iron-selected') ||
-                                  manualOption.getAttribute('aria-selected') === 'true';
-
-                if (!isSelected) {
-                    manualOption.click();
-                    logActivity("✅ Switched to Manual sort mode");
-                    await sleep(250);
-                } else {
-                    logActivity("✅ Manual sort mode already active");
-                }
-
-                // Close dropdown
-                const stillOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
-                if (stillOpen) {
-                    document.body.click();
-                    await sleep(100);
-                }
-
-                return true;
-            } else {
-                // Fallback: search for manual in all options
-                const allOptions = document.querySelectorAll('tp-yt-paper-listbox a tp-yt-paper-item');
-                for (const option of allOptions) {
-                    if (option.textContent.toLowerCase().includes('manual')) {
-                        option.click();
-                        logActivity("✅ Found and selected Manual sort mode");
-                        await sleep(250);
-                        document.body.click();
-                        return true;
-                    }
-                }
-
-                document.body.click();
-                logActivity("⚠️ Manual sort option not found");
-                return false;
-            }
-        };
-
-        await ensureManualSort();
-
-        // Get playlist information
+        const playlistContainer = document.querySelector("ytd-playlist-video-list-renderer");
         const videoCountElement = document.querySelector("ytd-playlist-sidebar-primary-info-renderer #stats span:first-child");
         const reportedVideoCount = videoCountElement ? parseInt(videoCountElement.innerText, 10) : 0;
-        const playlistContainer = document.querySelector("ytd-playlist-video-list-renderer");
 
-        if (!playlistContainer) {
-            logActivity("❌ Playlist container not found");
+        if (!playlistContainer || !reportedVideoCount) {
+            logActivity("❌ Playlist not ready for sorting");
             return;
         }
 
-        if (reportedVideoCount === 0) {
-            logActivity("❌ Could not determine video count");
-            return;
+        logActivity(`📊 Scanning playlist metadata (${reportedVideoCount})...`);
+
+        let snapshot = [];
+        try {
+            snapshot = await collectFullPlaylistSnapshot(playlistContainer, reportedVideoCount);
+        } catch (e) {
+            console.debug('[YouTubeSortByDuration] Snapshot scan failed', e);
         }
 
-        logActivity(`📊 Playlist has ${reportedVideoCount} videos`);
-
-        // Load all videos
-        let loadedVideoCount = 0;
-        if (autoScrollInitialVideoList) {
-            loadedVideoCount = await scrollUntilAllLoaded(reportedVideoCount);
-        } else {
-            const allDragPoints = playlistContainer.querySelectorAll("yt-icon#reorder");
-            loadedVideoCount = allDragPoints.length;
-        }
-
-        if (loadedVideoCount === 0) {
-            logActivity("❌ No videos loaded");
-            return;
-        }
-
-        const videoCount = Math.min(reportedVideoCount, loadedVideoCount);
-        logActivity(`✅ ${videoCount} videos ready for sorting`);
-
-        // Scroll to top
-        document.scrollingElement.scrollTop = 0;
-        await sleep(500);
-
-        // Get initial snapshot and ensure durations loaded
-        logActivity(`🔍 Loading video durations...`);
-        const initialVideos = await ensureDurationsLoaded(playlistContainer, videoCount);
-
-        if (!initialVideos.length) {
-            logActivity("❌ Could not read playlist items");
-            return;
-        }
-
-        // Check for missing durations
-        const missingDurations = initialVideos.filter(v => !v.hasDuration).length;
-        if (missingDurations > 0) {
-            logActivity(`⚠️ ${missingDurations} videos missing duration data`);
-        }
-
-        // Build desired sort order
-        logActivity(`🎯 Computing sort order...`);
-        const sortedVideos = [...initialVideos].sort((a, b) => {
-            if (a.duration === b.duration) {
-                return a.key.localeCompare(b.key);
-            }
-            return sortMode === 'asc' ? a.duration - b.duration : b.duration - a.duration;
-        });
-
-        const desiredOrder = sortedVideos.map(v => v.key);
-
-        // Check if already sorted
-        const currentOrder = initialVideos.map(v => v.key);
-        let alreadySorted = true;
-        for (let i = 0; i < videoCount; i++) {
-            if (currentOrder[i] !== desiredOrder[i]) {
-                alreadySorted = false;
-                break;
+        if (!snapshot || snapshot.length === 0) {
+            const loaded = await scrollUntilAllLoaded(reportedVideoCount);
+            snapshot = getPlaylistItems(playlistContainer).map(v => ({ key: v.key, duration: v.duration, durationText: v.durationText, hasDuration: v.hasDuration }));
+            if (!snapshot || snapshot.length === 0) {
+                logActivity('❌ Unable to capture playlist metadata. Aborting.');
+                return;
             }
         }
 
-        if (alreadySorted) {
-            logActivity(`✅ Playlist is already sorted!`);
+        logActivity(`🔑 Extracting video identifiers from ytInitialData...`);
+        const setVideoIdMap = extractSetVideoIds();
+        if (setVideoIdMap.size === 0) {
+            logActivity('❌ Could not extract setVideoIds from ytInitialData. Try refreshing the page.');
             return;
         }
 
-        // Execute sort
-        logActivity(`🚀 Starting sort with ${videoCount} videos...`);
-        const result = await sortVideosOptimized(playlistContainer, desiredOrder, videoCount);
+        logActivity(`✅ Found ${setVideoIdMap.size} video entries. Setting manual sort mode...`);
 
-        const totalTime = Math.round((Date.now() - sortStartTime) / 1000);
-        const actualSorted = result.actualCount || result.position;
+        // Ensure playlist is in manual sort mode - API reorder only works in manual mode
+        const sortButton = document.querySelector('yt-dropdown-menu[icon-label="Ordenar"] tp-yt-paper-button, yt-dropdown-menu[icon-label="Sort"] tp-yt-paper-button');
+        if (sortButton) {
+            try {
+                const isOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
+                if (isOpen) { document.body.click(); await sleep(100); }
+                sortButton.click();
+                await sleep(200);
+                if (!document.querySelector('tp-yt-paper-listbox:not([hidden])')) { sortButton.click(); await sleep(250); }
+                const manualOption = document.querySelector('tp-yt-paper-listbox a:first-child tp-yt-paper-item');
+                if (manualOption) {
+                    const isSelected = manualOption.hasAttribute('selected') || manualOption.classList.contains('iron-selected') || manualOption.getAttribute('aria-selected') === 'true';
+                    if (!isSelected) { manualOption.click(); await sleep(250); }
+                }
+                const stillOpen = document.querySelector('tp-yt-paper-listbox:not([hidden])');
+                if (stillOpen) document.body.click();
+            } catch (e) { console.debug('[YouTubeSortByDuration] Sort mode change error', e); }
+        }
 
-        if (stopSort) {
-            logActivity(`⛔ Sorting canceled (${result.position}/${videoCount} sorted in ${totalTime}s)`);
-            stopSort = false;
-        } else if (result.success) {
-            if (actualSorted < reportedVideoCount) {
-                // Some videos couldn't be sorted due to DOM limit
-                const remaining = reportedVideoCount - actualSorted;
-                logActivity(`✅ Sorted ${actualSorted}/${reportedVideoCount} videos in ${totalTime}s (${result.moveCount} moves). YouTube's DOM limit prevents sorting all videos at once. Scroll to around video #${Math.floor(actualSorted / 2)} and run sort again to continue.`);
+        logActivity(`🔄 Sorting ${snapshot.length} videos via YouTube API...`);
+
+        try {
+            const result = await sortByApi(snapshot, setVideoIdMap, playlistId);
+
+            if (stopSort) {
+                logActivity('Sort cancelled.');
+                stopSort = false;
+            } else if (result) {
+                logActivity(`✅ Sort complete! All videos sorted.`);
             } else {
-                logActivity(`✅ Sorting complete! ${actualSorted} videos sorted in ${totalTime}s with ${result.moveCount} moves`);
+                logActivity(`⚠️ Sort finished with some issues.`);
             }
-            document.scrollingElement.scrollTo({ top: 0, behavior: 'smooth' });
-        } else {
-            if (actualSorted < reportedVideoCount) {
-                const remaining = reportedVideoCount - actualSorted;
-                logActivity(`⚠️ Partial sort: ${actualSorted}/${reportedVideoCount} sorted in ${totalTime}s (${result.moveCount} moves). ${remaining} videos remain. Scroll to around video #${Math.floor(actualSorted / 2)} and run sort again.`);
-            } else {
-                logActivity(`⚠️ Partial sort: ${result.position}/${videoCount} videos sorted in ${totalTime}s`);
-            }
+        } catch (err) {
+            console.debug('[YouTubeSortByDuration] Sort error', err);
+            logActivity('❌ Error during sorting: ' + err.message);
+            if (stopSort) stopSort = false;
         }
-
-        // Reset error tracker
-        errorTracker.consecutiveErrors = 0;
     };
 
     // Initialize UI
@@ -1325,12 +935,22 @@
             renderSelectElement(0, modeAvailable, 'Sort Order');
             renderLogElement();
 
+            applyTheme();
+            const themeInterval = setInterval(applyTheme, 2000);
+
             const checkInterval = setInterval(() => {
                 if (isYouTubePageReady()) {
                     logActivity('✓ Ready to sort');
                     clearInterval(checkInterval);
                 }
             }, 1000);
+
+            const containerCheck = setInterval(() => {
+                if (!document.querySelector('.sort-playlist')) {
+                    clearInterval(themeInterval);
+                    clearInterval(containerCheck);
+                }
+            }, 5000);
         });
     };
 
